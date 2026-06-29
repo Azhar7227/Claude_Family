@@ -1,312 +1,366 @@
-/** Screen renderers. Pure-ish: each takes the store and returns a DOM node. */
+/** Premium screen renderers — calm, card-based, one-tap, progressive disclosure. */
 
 import { h } from './dom.ts';
+import { icon, categoryIcon } from './icons.ts';
 import type { AppStore } from './store.ts';
 import type { Proposal, Adjustment } from '../pipeline/proposal.ts';
 import { utcToLocalHHmm } from '../engine/time.ts';
 
 export type Route = 'home' | 'today' | 'add' | 'routines' | 'settings' | 'notifications' | 'debug';
 
-function hhmm(store: AppStore, iso: string): string {
-  return utcToLocalHHmm(iso, store.settings.timezone);
-}
+const hhmm = (store: AppStore, iso: string) => utcToLocalHHmm(iso, store.settings.timezone);
+/** Human time for the timeline: midnight means "no time set" -> shown as a dash. */
+const timeLabel = (store: AppStore, iso: string) => { const t = hhmm(store, iso); return t === '00:00' ? '—' : t; };
 
-// ---------- Onboarding ----------
+const EXAMPLES = ['Wake at 5', 'Gym after work', 'Study 1 hour daily', 'Pray at 5:10', 'Read 30 min', 'Sleep at 11'];
+
+// ============================ Onboarding ============================
 export function onboarding(store: AppStore): HTMLElement {
-  const ta = h('textarea', {
-    class: 'big-input',
-    rows: 5,
-    placeholder: 'e.g. I work Mon–Fri 9 to 6. Wake at 5. Gym after work. Study Salesforce 1 hour daily. Pray at 5:10.',
-  });
-  return h('div', { class: 'screen onboarding' },
-    h('h1', {}, 'Welcome to LifeFlow'),
-    h('p', { class: 'muted' }, 'Describe your life in plain words. I’ll build a routine — you review before anything is saved.'),
+  const ta = h('textarea', { class: 'big-input', rows: 4, placeholder: 'I work Mon–Fri 9 to 6. Wake at 5. Gym after work. Study 1 hour daily.' });
+  const addEx = (t: string) => { ta.value = (ta.value ? ta.value.trim() + '. ' : '') + t; ta.focus(); };
+  return h('div', { class: 'screen' },
+    h('div', { class: 'onb-hero' },
+      h('div', { class: 'onb-mark' }, icon('sparkles', 30)),
+      h('h1', {}, 'Tell me about your life'),
+      h('p', { class: 't2' }, 'A sentence or two. I’ll build your routine — you approve before anything is saved.'),
+    ),
     ta,
-    h('button', { class: 'primary', onclick: () => store.capture({ method: 'text', text: ta.value }) }, 'Build my routine'),
-    h('p', { class: 'muted small' }, 'Nothing is committed until you accept the proposal.'),
+    h('div', { class: 'example-chips' }, ...EXAMPLES.map((e) => h('button', { class: 'chip', onclick: () => addEx(e) }, e))),
+    h('button', { class: 'btn primary block lg', onclick: () => store.capture({ method: 'text', text: ta.value }) }, icon('sparkles', 20), 'Build my routine'),
   );
 }
 
-// ---------- Proposal review ----------
-export function proposalReview(store: AppStore, p: Proposal): HTMLElement {
-  const checks = new Map<string, HTMLInputElement>();
-  const adjEl = (a: Adjustment) => {
-    const cb = h('input', { type: 'checkbox', checked: true });
-    checks.set(a.targetRef, cb);
-    const head = h('div', { class: 'adj-head' },
-      cb,
-      h('span', { class: `op op-${a.op}` }, a.op),
-      h('span', { class: 'adj-title' }, describeAdjustment(store, a)),
-      a.lowConfidence ? h('span', { class: 'badge warn' }, 'low confidence') : null,
-    );
-    const ex = a.explanation
-      ? h('details', { class: 'explain' },
-          h('summary', {}, 'Why?'),
-          line('Why', a.explanation.why),
-          listLine('Changed', a.explanation.whatChanged),
-          listLine('Preserved', a.explanation.constraintsPreserved),
-          a.explanation.alternatives.length
-            ? h('div', { class: 'alts' }, h('b', {}, 'Alternatives considered:'),
-                ...a.explanation.alternatives.map((alt) => h('div', { class: 'alt' }, `• ${alt.summary} — ${alt.rejectedBecause}`)))
-            : null,
-          line('Selected because', a.explanation.selectionReason),
+// ============================ Home ============================
+export function home(store: AppStore): HTMLElement {
+  store.refreshMissed();
+  const v = store.today();
+  const missed = v.timeline.filter((e) => e.status === 'missed').length;
+  const pct = v.totalCount ? Math.round((v.doneCount / v.totalCount) * 100) : 0;
+
+  const focus = v.current
+    ? h('div', { class: 'focus-card now' },
+        h('div', { class: 'eyebrow' }, h('span', { class: 'live-dot' }), 'Right now'),
+        h('div', { class: 'focus-title' }, v.current.title),
+        h('div', { class: 'focus-meta' }, icon('clock', 16), `${hhmm(store, v.current.start)} – ${hhmm(store, v.current.end)}`, h('span', { class: 'muted' }, `· ${v.remainingMin} min left`)),
+        h('div', { class: 'focus-actions' },
+          h('button', { class: 'btn primary', onclick: () => store.complete(v.current!.occurrenceId) }, h('span', { class: 'check-circle' }, icon('check', 15)), 'Complete'),
+          h('button', { class: 'btn ghost', onclick: () => store.skip(v.current!.occurrenceId) }, 'Skip'),
+        ),
+      )
+    : v.next
+      ? h('div', { class: 'focus-card' },
+          h('div', { class: 'eyebrow' }, 'Next up'),
+          h('div', { class: 'focus-title' }, v.next.title),
+          h('div', { class: 'focus-meta' }, icon('clock', 16), `Starts ${hhmm(store, v.next.start)}`),
         )
-      : null;
-    return h('div', { class: 'adj' }, head, ex);
-  };
+      : h('div', { class: 'focus-card' }, h('div', { class: 'empty-state' }, h('span', { class: 'glyph' }, icon('leaf', 34)), h('div', {}, 'Your day is clear'), h('p', { class: 'small muted' }, 'Tap ＋ to add something.')));
 
-  const conflictEls = p.conflicts.map((c) => h('div', { class: 'conflict' }, `⚠ ${c.detail}`));
-  const ambEls = p.ambiguities.map((a) => h('div', { class: 'amb' }, `❔ ${a.question}`));
+  const peeks: HTMLElement[] = [];
+  if (v.current && v.next) peeks.push(peekRow(store, v.next));
+  if (v.after) peeks.push(peekRow(store, v.after));
 
-  const accept = (refs?: string[]) => store.acceptPending(refs);
-  const acceptSelected = () => {
-    const refs = [...checks.entries()].filter(([, cb]) => cb.checked).map(([ref]) => ref);
-    if (refs.length === 0) store.rejectPending();
-    else if (store.pendingProposal === p && refs.length === p.adjustments.length) accept();
-    else if (store.pendingProposal === p) accept(refs);
-    else store.applyProposal(p, refs); // maintenance proposal path
-  };
+  return h('div', { class: 'screen' },
+    h('div', { class: 'home-head' },
+      h('div', {}, h('div', { class: 'home-date' }, friendlyToday()), h('h1', {}, greeting())),
+      v.totalCount ? h('div', { class: 'ring', style: `--p:${pct}` }, h('span', {}, `${v.doneCount}/${v.totalCount}`)) : null,
+    ),
+    missed ? suggestionCard(store) : null,
+    focus,
+    peeks.length ? h('div', { class: 'peeks' }, ...peeks) : null,
+  );
+}
 
+function peekRow(store: AppStore, e: { title: string; start: string; category: string }): HTMLElement {
+  return h('div', { class: 'peek' },
+    h('span', { class: 'time' }, timeLabel(store, e.start)),
+    h('span', { class: 'cdot', style: `background:var(--cat-${e.category})` }),
+    h('span', { class: 'ttl' }, e.title),
+  );
+}
+
+/** Actionable suggestion — replaces the old warning banner. */
+function suggestionCard(store: AppStore): HTMLElement {
+  return h('div', { class: 'suggestion' },
+    h('span', { class: 'si' }, icon('sparkles', 22)),
+    h('div', { class: 'sbody' },
+      h('div', { class: 'sttl' }, 'Running a little behind'),
+      h('div', { class: 'ssub' }, 'I can reflow the rest of your day around what’s fixed.'),
+    ),
+    h('button', { class: 'btn primary', onclick: () => store.rebuildDay() }, 'Rebuild'),
+  );
+}
+
+// ============================ Today / timeline ============================
+export function today(store: AppStore, dateLocal: string, setDate: (d: string) => void): HTMLElement {
+  const entries = store.timelineFor(dateLocal);
+  const isToday = dateLocal === store.todayLocalDate();
+  const now = Date.parse(store.nowIso());
+  let dividerPlaced = false;
+
+  const rows: HTMLElement[] = [];
+  for (const e of entries) {
+    if (isToday && !dividerPlaced && e.status === 'planned' && Date.parse(e.start) > now) {
+      rows.push(h('div', { class: 'now-divider' }, 'NOW'));
+      dividerPlaced = true;
+    }
+    const tick = h('button', { class: 'tl-tick', onclick: (ev: Event) => { ev.stopPropagation(); store.complete(e.occurrenceId); } }, e.status === 'done' ? icon('check', 16) : '');
+    const actions = h('div', { class: 'row-actions' },
+      h('button', { class: 'chip', onclick: (ev: Event) => { ev.stopPropagation(); store.complete(e.occurrenceId); } }, icon('check', 15), 'Done'),
+      h('button', { class: 'chip', onclick: (ev: Event) => { ev.stopPropagation(); store.skip(e.occurrenceId); } }, icon('skip', 15), 'Skip'),
+    );
+    const row = h('div', { class: `tl-row ${e.status}` },
+      h('span', { class: 'tl-time' }, timeLabel(store, e.start)),
+      h('span', { class: 'tl-main' },
+        h('span', { class: 'cdot', style: `background:var(--cat-${e.category})` }),
+        h('span', { class: 'tl-title' }, e.title),
+        e.type === 'fixed' ? h('span', { class: 'lock' }, icon('flag', 13)) : null,
+      ),
+      e.status === 'planned' || e.status === 'done' ? tick : h('span', {}),
+      actions,
+    );
+    if (e.status === 'planned') row.addEventListener('click', () => row.classList.toggle('open'));
+    rows.push(row);
+  }
+
+  return h('div', { class: 'screen' },
+    h('div', { class: 'day-switch' },
+      h('button', { class: 'icon-btn', onclick: () => setDate(shiftDate(dateLocal, -1)), style: 'transform:rotate(180deg)' }, icon('chevron', 22)),
+      h('span', { class: 'label' }, isToday ? 'Today' : friendlyDate(dateLocal)),
+      h('button', { class: 'icon-btn', onclick: () => setDate(shiftDate(dateLocal, 1)) }, icon('chevron', 22)),
+    ),
+    entries.length ? h('div', { class: 'timeline' }, ...rows) : emptyState('Nothing scheduled', 'Enjoy the open space — or add something.'),
+  );
+}
+
+// ============================ Add ============================
+export function add(store: AppStore): HTMLElement {
+  let method: 'text' | 'ics' = 'text';
+  const ta = h('textarea', { class: 'big-input', rows: 4, placeholder: 'Add anything: “Dentist Tuesday 3pm”, “Walk 20 min daily”…' });
+  const chips = h('div', { class: 'example-chips' }, ...EXAMPLES.map((e) => h('button', { class: 'chip', onclick: () => { ta.value = (ta.value ? ta.value.trim() + '. ' : '') + e; } }, e)));
+  const submit = () => method === 'ics' ? store.capture({ method: 'ics', uploadId: 'paste', icsText: ta.value }) : store.capture({ method: 'text', text: ta.value });
+  return h('div', { class: 'screen' },
+    h('h2', {}, 'Add to your life'),
+    h('div', { class: 'seg' },
+      h('button', { class: 'seg-btn active', onclick: (ev: Event) => { method = 'text'; ta.placeholder = 'Add anything in plain words…'; chips.style.display = 'flex'; segToggle(ev); } }, 'Describe'),
+      h('button', { class: 'seg-btn', onclick: (ev: Event) => { method = 'ics'; ta.placeholder = 'Paste calendar (.ics) text…'; chips.style.display = 'none'; segToggle(ev); } }, 'Paste .ics'),
+    ),
+    ta,
+    chips,
+    h('button', { class: 'btn primary block lg', onclick: submit }, icon('sparkles', 20), 'Create proposal'),
+  );
+}
+
+// ============================ Proposal review ============================
+export function proposalReview(store: AppStore, p: Proposal): HTMLElement {
+  const selected = new Set(p.adjustments.map((a) => a.targetRef));
   const isCapture = store.pendingProposal === p && (p.reason === 'initial_capture' || p.reason === 'reimport');
 
-  return h('div', { class: 'screen review' },
-    h('h2', {}, isCapture ? 'Review your plan' : 'Suggested adjustment'),
-    p.explanation ? h('div', { class: 'proposal-why' }, p.explanation.why) : null,
-    p.adjustments.length === 0 ? h('p', { class: 'muted' }, 'No changes needed — everything fits.') : null,
-    ...p.adjustments.map(adjEl),
-    conflictEls.length ? h('div', { class: 'conflicts' }, ...conflictEls) : null,
-    ambEls.length ? h('div', { class: 'ambs' }, ...ambEls) : null,
-    h('div', { class: 'review-actions' },
-      h('button', { class: 'primary', onclick: acceptSelected }, 'Accept selected'),
-      h('button', { class: 'ghost', onclick: () => (store.pendingProposal === p ? store.rejectPending() : dismiss(store)) }, 'Dismiss'),
+  const cardFor = (a: Adjustment) => {
+    const tick = h('span', { class: 'tick-box' }, icon('check', 14));
+    const card = h('div', { class: 'sugg-card selected' },
+      h('div', { class: 'sugg-head' },
+        h('span', { class: `op-pill op-${a.op}` }, icon(opIcon(a.op), 17)),
+        h('div', { class: 'sugg-body' }, h('div', { class: 'sugg-title' }, adjTitle(store, a)), h('div', { class: 'sugg-sub' }, adjSub(store, a))),
+        a.lowConfidence ? h('span', { class: 'pill-note' }, 'check this') : null,
+        tick,
+      ),
+    );
+    if (a.explanation) {
+      const panel = h('div', { class: 'why-panel' },
+        whyLine('Why', a.explanation.why),
+        whyList('Kept', a.explanation.constraintsPreserved),
+        ...a.explanation.alternatives.map((alt) => h('div', { class: 'alt' }, `• ${alt.summary} — ${alt.rejectedBecause}`)),
+        a.explanation.selectionReason ? whyLine('Chosen', a.explanation.selectionReason) : null,
+      );
+      const toggle = h('button', { class: 'why-toggle', onclick: (ev: Event) => { ev.stopPropagation(); toggle.classList.toggle('open'); panel.classList.toggle('open'); } }, icon('chevron', 14), 'Why this?');
+      card.append(toggle, panel);
+    }
+    card.addEventListener('click', () => {
+      const on = card.classList.toggle('selected');
+      if (on) selected.add(a.targetRef); else selected.delete(a.targetRef);
+    });
+    return card;
+  };
+
+  const apply = () => {
+    const refs = [...selected];
+    if (store.pendingProposal === p) { if (refs.length) store.acceptPending(refs.length === p.adjustments.length ? undefined : refs); else store.rejectPending(); }
+    else if (refs.length) store.applyProposal(p, refs.length === p.adjustments.length ? undefined : refs);
+    else dismiss(store);
+  };
+
+  return h('div', { class: 'screen' },
+    h('h2', {}, isCapture ? 'Review your plan' : 'A suggestion'),
+    !isCapture && p.explanation ? h('div', { class: 'proposal-why' }, h('span', { class: 'si' }, icon('sparkles', 20)), h('div', {}, p.explanation.why)) : null,
+    p.adjustments.length === 0 ? emptyState('All good', 'Everything already fits.') : null,
+    ...p.adjustments.map(cardFor),
+    ...p.conflicts.map((c) => h('div', { class: 'proposal-why' }, h('span', { class: 'si' }, icon('clock', 18)), h('div', { class: 'small' }, c.detail))),
+    p.adjustments.length
+      ? h('div', { class: 'sticky-actions' },
+          h('button', { class: 'btn primary', onclick: apply }, isCapture ? 'Add to my routine' : 'Accept'),
+          h('button', { class: 'btn ghost', onclick: () => (store.pendingProposal === p ? store.rejectPending() : dismiss(store)) }, 'Not now'),
+        )
+      : h('button', { class: 'btn ghost block', onclick: () => dismiss(store) }, 'Close'),
+  );
+}
+
+// ============================ Routines ============================
+export function routines(store: AppStore): HTMLElement {
+  const tasks = store.tasks();
+  if (!tasks.length) return h('div', { class: 'screen' }, h('h2', {}, 'Routines'), emptyState('No routines yet', 'Use ＋ to create some.'));
+  const byCat = new Map<string, typeof tasks>();
+  for (const t of tasks) { const a = byCat.get(t.category) ?? []; a.push(t); byCat.set(t.category, a); }
+
+  const groups: HTMLElement[] = [h('h2', {}, 'Routines')];
+  for (const [cat, list] of byCat) {
+    groups.push(h('h3', {}, cat));
+    groups.push(h('div', { class: 'group' }, ...list.map((t) => {
+      const r = store.recurrenceFor(t.id);
+      return h('div', { class: 'list-row' },
+        h('span', { class: 'lead', style: `color:var(--cat-${t.category})` }, categoryIcon(t.category, 18)),
+        h('div', { class: 'lmain' },
+          h('div', { class: 'ltitle' }, t.title, h('span', { class: 'tag' }, t.type)),
+          h('div', { class: 'lsub' }, r ? `${r.startTimeLocal ?? 'anytime'} · ${humanRRule(r.rrule)}` : 'one-off'),
+        ),
+        h('button', { class: 'row-act', onclick: () => { const n = prompt('Rename', t.title); if (n) store.renameTask(t.id, n); } }, icon('edit', 18)),
+        h('button', { class: 'row-act danger', onclick: () => { if (confirm(`Delete “${t.title}”?`)) store.deleteTask(t.id); } }, icon('trash', 18)),
+      );
+    })));
+  }
+  return h('div', { class: 'screen' }, ...groups);
+}
+
+// ============================ Settings ============================
+export function settings(store: AppStore, openDebug: () => void): HTMLElement {
+  const s = store.settings;
+  const OFFSETS = [0, 5, 10, 15, 30, 60];
+  const offsetChips = h('div', { class: 'example-chips' }, ...OFFSETS.map((o) =>
+    h('button', { class: `chip ${s.reminderOffsetsMin.includes(o) ? 'accent' : ''}`, onclick: () => {
+      const set = new Set(s.reminderOffsetsMin);
+      set.has(o) ? set.delete(o) : set.add(o);
+      store.updateSettings({ reminderOffsetsMin: [...set].sort((a, b) => b - a) });
+    } }, o === 0 ? 'on time' : `${o}m`)));
+
+  return h('div', { class: 'screen' },
+    h('h2', {}, 'You'),
+    h('h3', {}, 'Your day'),
+    h('div', { class: 'group' },
+      listRow('today', 'Time zone', s.timezone),
+      listRowControl('moon', 'Day ends at', stepperTime(store, s.dayEndLocal)),
+    ),
+    h('h3', {}, 'Reminders'),
+    h('div', { class: 'group' },
+      h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon('bell', 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, 'Remind me'), h('div', { class: 'lsub' }, 'before each task'))),
+      h('div', { style: 'padding:0 16px 16px' }, offsetChips),
+      listRowControl('bell', 'Max per day', stepper(store, 'maxPerDay', s.maxPerDay, 1, 30)),
+      listRowControl('clock', 'Batch window', stepper(store, 'batchWindowMin', s.batchWindowMin, 0, 120, 5, 'm')),
+    ),
+    h('h3', {}, 'Data'),
+    h('div', { class: 'group' },
+      rowButton('doc', 'Developer console', openDebug),
+      rowButton('trash', 'Reset all data', () => { if (confirm('Erase everything?')) store.reset(); }, true),
     ),
   );
 }
 
-function dismiss(store: AppStore): void {
-  store.pendingProposal = null;
-  // trigger a re-render via a no-op settings update
-  store.updateSettings({});
+// ============================ Notifications ============================
+export function notifications(store: AppStore): HTMLElement {
+  const plan = store.notificationPlan();
+  return h('div', { class: 'screen' },
+    h('h2', {}, 'Reminders'),
+    h('p', { class: 'small muted' }, `${store.settings.maxPerDay}/day budget · ${plan.suppressed.length} quieted to reduce noise`),
+    plan.notifications.length
+      ? h('div', { class: 'group' }, ...plan.notifications.map((n) =>
+          h('div', { class: `list-row notif ${n.priority}` },
+            h('span', { class: 'ntime' }, hhmm(store, n.fireAt)),
+            h('span', { class: 'lead' }, icon('bell', 16)),
+            h('div', { class: 'nbody' }, n.items.map((i) => i.title).join(', '), n.batched ? h('div', { class: 'nbatch' }, `+ ${n.items.length} together`) : null),
+          )))
+      : emptyState('All quiet', 'No reminders coming up.'),
+  );
 }
 
-function describeAdjustment(store: AppStore, a: Adjustment): string {
+// ============================ Debug ============================
+export function debug(store: AppStore): HTMLElement {
+  const trace = store.lastTrace;
+  const rate = store.evalSink.acceptanceRate();
+  const lastLatency = store.evalSink.extractions.at(-1)?.latencyMs ?? 0;
+  const stages = trace
+    ? trace.stages.map((st) => h('details', { class: 'stage', open: st.status === 'error' },
+        h('summary', {}, h('span', { class: 'sname' }, st.name), st.note ? h('span', { class: 'small muted' }, st.note) : null, h('span', { class: `badge ${st.status === 'ok' ? 'ok' : 'warn'}` }, `${st.status} · ${st.durationMs}ms`)),
+        h('pre', { class: 'json' }, safeJson(st.data))))
+    : [emptyState('No run yet', 'Capture something to populate the trace.')];
+
+  return h('div', { class: 'screen' },
+    h('h2', {}, 'Pipeline'),
+    h('p', { class: 'small muted' }, 'Input → Normalize → Extract → Validate → Proposal → Accept → Commit'),
+    h('div', { class: 'kpi' },
+      kpi(String(store.evalSink.extractions.length), 'extractions'),
+      kpi(rate === null ? '—' : `${Math.round(rate * 100)}%`, 'accepted'),
+      kpi(`${lastLatency}ms`, 'last latency'),
+    ),
+    h('div', { class: 'group' }, ...stages),
+    h('h3', {}, 'Eval traces'),
+    h('div', { class: 'group' }, h('details', {}, h('summary', { style: 'padding:14px 16px' }, h('span', { class: 'sname' }, `${store.evalSink.extractions.length} records`)), h('pre', { class: 'json' }, safeJson(store.evalSink.extractions)))),
+    h('h3', {}, 'Change ledger'),
+    h('div', { class: 'group' }, h('details', {}, h('summary', { style: 'padding:14px 16px' }, h('span', { class: 'sname' }, `${store.ledger().length} entries`)), h('pre', { class: 'json' }, safeJson(store.ledger())))),
+  );
+}
+
+// ============================ helpers ============================
+function dismiss(store: AppStore): void { store.pendingProposal = null; store.updateSettings({}); }
+function segToggle(ev: Event): void { const b = ev.currentTarget as HTMLElement; b.parentElement?.querySelectorAll('.seg-btn').forEach((x) => x.classList.remove('active')); b.classList.add('active'); }
+function opIcon(op: string): string { return op === 'add' ? 'plus' : op === 'remove' ? 'trash' : op === 'skip' ? 'skip' : 'routines'; }
+
+function adjTitle(store: AppStore, a: Adjustment): string {
+  if (a.op === 'add' && a.after) return a.after.title;
+  if (a.occurrenceChange) return a.after?.title ?? a.explanation?.whatChanged[0] ?? a.rationale;
+  return a.rationale;
+}
+function adjSub(store: AppStore, a: Adjustment): string {
   if (a.op === 'add' && a.after) {
-    const time = a.after.startTimeLocal ? ` at ${a.after.startTimeLocal}` : '';
-    const rep = a.after.rrule ? ` · ${humanRRule(a.after.rrule)}` : '';
-    return `${a.after.title}${time}${rep} (${a.after.type}/${a.after.category})`;
+    const time = a.after.startTimeLocal ? a.after.startTimeLocal : 'anytime';
+    return `${time} · ${humanRRule(a.after.rrule ?? '')} · ${a.after.type}`;
   }
   if (a.occurrenceChange) {
     const oc = a.occurrenceChange;
-    if (a.op === 'skip') return `Skip — ${a.explanation?.whatChanged[0] ?? ''}`;
-    return `${a.after?.title ?? 'Task'} → ${hhmm(store, oc.afterStart)}–${hhmm(store, oc.afterEnd)} (was ${hhmm(store, oc.beforeStart)})`;
+    if (a.op === 'skip') return 'No free slot today — skip?';
+    return `${hhmm(store, oc.beforeStart)} → ${hhmm(store, oc.afterStart)}`;
   }
-  return a.rationale;
+  return '';
 }
+function whyLine(label: string, value: string): HTMLElement { return h('div', { class: 'why-line' }, h('b', {}, `${label}: `), value); }
+function whyList(label: string, items: string[]): HTMLElement | null { return items.length ? whyLine(label, items.join(' · ')) : null; }
 
-// ---------- Home ----------
-export function home(store: AppStore): HTMLElement {
-  store.refreshMissed();
-  const view = store.today();
-  const missed = view.timeline.filter((e) => e.status === 'missed');
+function listRow(ic: string, label: string, value: string): HTMLElement {
+  return h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon(ic, 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, label)), h('span', { class: 'muted small' }, value));
+}
+function listRowControl(ic: string, label: string, control: Node): HTMLElement {
+  return h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon(ic, 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, label)), control);
+}
+function rowButton(ic: string, label: string, onclick: () => void, danger = false): HTMLElement {
+  return h('div', { class: 'list-row', onclick, style: 'cursor:pointer' }, h('span', { class: `lead ${danger ? '' : ''}` }, icon(ic, 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle', style: danger ? 'color:var(--danger)' : '' }, label)), icon('chevron', 18));
+}
+function stepper(store: AppStore, key: 'maxPerDay' | 'batchWindowMin', val: number, min: number, max: number, step = 1, suffix = ''): HTMLElement {
+  const out = h('span', { class: 'val' }, `${val}${suffix}`);
+  const set = (n: number) => { const c = Math.max(min, Math.min(max, n)); store.updateSettings({ [key]: c } as never); };
+  return h('div', { class: 'stepper' }, h('button', { onclick: () => set(val - step) }, '−'), out, h('button', { onclick: () => set(val + step) }, '+'));
+}
+function stepperTime(store: AppStore, val: string): HTMLElement {
+  const [hh] = val.split(':').map(Number);
+  const out = h('span', { class: 'val' }, val);
+  const set = (h2: number) => { const c = ((h2 % 24) + 24) % 24; store.updateSettings({ dayEndLocal: `${String(c).padStart(2, '0')}:00` }); };
+  return h('div', { class: 'stepper' }, h('button', { onclick: () => set(hh! - 1) }, '−'), out, h('button', { onclick: () => set(hh! + 1) }, '+'));
+}
+function kpi(value: string, label: string): HTMLElement { return h('div', { class: 'k' }, h('div', { class: 'kv' }, value), h('div', { class: 'kl' }, label)); }
+function emptyState(title: string, sub: string): HTMLElement { return h('div', { class: 'empty-state' }, h('span', { class: 'glyph' }, icon('leaf', 32)), h('div', { style: 'font-weight:600;color:var(--text-2)' }, title), h('p', { class: 'small' }, sub)); }
+function safeJson(v: unknown): string { try { return JSON.stringify(v, null, 2); } catch { return String(v); } }
 
-  const hero = view.current
-    ? h('div', { class: 'hero now' },
-        h('div', { class: 'hero-label' }, 'NOW'),
-        h('div', { class: 'hero-title' }, view.current.title),
-        h('div', { class: 'hero-time' }, `${hhmm(store, view.current.start)}–${hhmm(store, view.current.end)} · ${view.remainingMin} min left`),
-        h('button', { class: 'primary big', onclick: () => store.complete(view.current!.occurrenceId) }, '✓ Complete'),
-      )
-    : view.next
-      ? h('div', { class: 'hero next' },
-          h('div', { class: 'hero-label' }, 'NEXT UP'),
-          h('div', { class: 'hero-title' }, view.next.title),
-          h('div', { class: 'hero-time' }, `starts ${hhmm(store, view.next.start)}`),
-        )
-      : h('div', { class: 'hero empty' }, h('div', { class: 'hero-title' }, 'Nothing scheduled'), h('p', { class: 'muted' }, 'Add something to your day.'));
-
-  return h('div', { class: 'screen home' },
-    h('div', { class: 'home-head' }, h('h2', {}, greeting()), h('span', { class: 'count' }, `${view.doneCount}/${view.totalCount} done`)),
-    missed.length
-      ? h('div', { class: 'banner', },
-          h('span', {}, `⚡ ${missed.length} task${missed.length > 1 ? 's' : ''} slipped. Rebuild the rest of your day?`),
-          h('button', { class: 'small-btn', onclick: () => store.rebuildDay() }, 'Rebuild'))
-      : null,
-    hero,
-    view.next && view.current ? peek(store, 'Next', view.next) : null,
-    view.after ? peek(store, 'After that', view.after) : null,
-  );
-}
-
-function peek(store: AppStore, label: string, e: { title: string; start: string }): HTMLElement {
-  return h('div', { class: 'peek' }, h('span', { class: 'peek-label' }, label), h('span', {}, `${hhmm(store, e.start)} · ${e.title}`));
-}
-
-// ---------- Today / timeline ----------
-export function today(store: AppStore, dateLocal: string, setDate: (d: string) => void): HTMLElement {
-  const entries = store.timelineFor(dateLocal);
-  const rows = entries.map((e) =>
-    h('div', { class: `tl-row status-${e.status}` },
-      h('span', { class: 'tl-time' }, hhmm(store, e.start)),
-      h('span', { class: `dot cat-${e.category}` }),
-      h('span', { class: 'tl-title' }, e.title, e.type === 'fixed' ? h('span', { class: 'lock' }, ' 🔒') : null),
-      h('span', { class: 'tl-status' }, e.status),
-      e.status === 'planned' ? h('button', { class: 'tiny', onclick: () => store.complete(e.occurrenceId) }, '✓') : null,
-      e.status === 'planned' ? h('button', { class: 'tiny ghost', onclick: () => store.skip(e.occurrenceId) }, 'skip') : null,
-    ),
-  );
-  return h('div', { class: 'screen today' },
-    h('div', { class: 'date-nav' },
-      h('button', { class: 'tiny', onclick: () => setDate(shiftDate(dateLocal, -1)) }, '‹'),
-      h('b', {}, dateLocal),
-      h('button', { class: 'tiny', onclick: () => setDate(shiftDate(dateLocal, 1)) }, '›'),
-    ),
-    entries.length ? h('div', { class: 'timeline' }, ...rows) : h('p', { class: 'muted' }, 'Nothing scheduled this day.'),
-  );
-}
-
-// ---------- Add ----------
-export function add(store: AppStore): HTMLElement {
-  let method: 'text' | 'ics' = 'text';
-  const ta = h('textarea', { class: 'big-input', rows: 5, placeholder: 'Describe what to add, or paste .ics text…' });
-  const methodLabel = h('span', { class: 'muted small' }, 'mode: text');
-  return h('div', { class: 'screen add' },
-    h('h2', {}, 'Add to your life'),
-    h('div', { class: 'seg' },
-      h('button', { class: 'seg-btn active', onclick: (ev: Event) => { method = 'text'; methodLabel.textContent = 'mode: text'; toggle(ev); } }, 'Text / Chat'),
-      h('button', { class: 'seg-btn', onclick: (ev: Event) => { method = 'ics'; methodLabel.textContent = 'mode: .ics'; toggle(ev); } }, 'Paste .ics'),
-    ),
-    methodLabel,
-    ta,
-    h('button', { class: 'primary', onclick: () => {
-      if (method === 'ics') store.capture({ method: 'ics', uploadId: 'paste', icsText: ta.value });
-      else store.capture({ method: 'text', text: ta.value });
-    } }, 'Create proposal'),
-  );
-}
-
-function toggle(ev: Event): void {
-  const btn = ev.currentTarget as HTMLElement;
-  btn.parentElement?.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
-  btn.classList.add('active');
-}
-
-// ---------- Routines editor ----------
-export function routines(store: AppStore): HTMLElement {
-  const tasks = store.tasks();
-  if (!tasks.length) return h('div', { class: 'screen' }, h('p', { class: 'muted' }, 'No routines yet. Use Add to create some.'));
-  const rows = tasks.map((t) => {
-    const r = store.recurrenceFor(t.id);
-    return h('div', { class: 'routine-row' },
-      h('span', { class: `dot cat-${t.category}` }),
-      h('div', { class: 'routine-main' },
-        h('div', { class: 'routine-title' }, t.title, h('span', { class: 'tag' }, t.type)),
-        h('div', { class: 'muted small' }, r ? `${r.startTimeLocal ?? 'any time'} · ${humanRRule(r.rrule)}` : 'one-off'),
-      ),
-      h('button', { class: 'tiny ghost', onclick: () => {
-        const name = prompt('Rename task', t.title);
-        if (name) store.renameTask(t.id, name);
-      } }, 'rename'),
-      h('button', { class: 'tiny danger', onclick: () => { if (confirm(`Delete "${t.title}"?`)) store.deleteTask(t.id); } }, 'delete'),
-    );
-  });
-  return h('div', { class: 'screen routines' }, h('h2', {}, 'Routines'), ...rows);
-}
-
-// ---------- Settings ----------
-export function settings(store: AppStore): HTMLElement {
-  const s = store.settings;
-  const offsets = h('input', { value: s.reminderOffsetsMin.join(', '), class: 'field' });
-  const maxPerDay = h('input', { type: 'number', value: String(s.maxPerDay), class: 'field' });
-  const batch = h('input', { type: 'number', value: String(s.batchWindowMin), class: 'field' });
-  const dayEnd = h('input', { value: s.dayEndLocal, class: 'field' });
-  return h('div', { class: 'screen settings' },
-    h('h2', {}, 'Settings'),
-    field('Timezone', h('span', { class: 'muted' }, s.timezone)),
-    field('Reminder offsets (min before)', offsets),
-    field('Max notifications / day', maxPerDay),
-    field('Batch window (min)', batch),
-    field('Day ends at (HH:mm)', dayEnd),
-    h('button', { class: 'primary', onclick: () => store.updateSettings({
-      reminderOffsetsMin: offsets.value.split(',').map((x) => Number(x.trim())).filter((n) => !Number.isNaN(n)),
-      maxPerDay: Number(maxPerDay.value) || 8,
-      batchWindowMin: Number(batch.value) || 30,
-      dayEndLocal: /^\d{1,2}:\d{2}$/.test(dayEnd.value) ? dayEnd.value : s.dayEndLocal,
-    }) }, 'Save'),
-    h('hr', {}),
-    h('button', { class: 'danger', onclick: () => { if (confirm('Erase all data?')) store.reset(); } }, 'Reset all data'),
-  );
-}
-
-// ---------- Notifications ----------
-export function notifications(store: AppStore): HTMLElement {
-  const plan = store.notificationPlan();
-  const rows = plan.notifications.map((n) =>
-    h('div', { class: `notif p-${n.priority}` },
-      h('span', { class: 'notif-time' }, hhmm(store, n.fireAt)),
-      h('span', { class: 'notif-body' }, n.items.map((i) => i.title).join(', '), n.batched ? h('span', { class: 'badge' }, 'batched') : null),
-      h('span', { class: `badge ${n.priority === 'high' ? 'warn' : ''}` }, n.priority),
-    ),
-  );
-  return h('div', { class: 'screen notifications' },
-    h('h2', {}, 'Upcoming notifications'),
-    h('p', { class: 'muted small' }, `Budget ${store.settings.maxPerDay}/day · batch ${store.settings.batchWindowMin}m. ${plan.suppressed.length} suppressed.`),
-    rows.length ? h('div', { class: 'notif-list' }, ...rows) : h('p', { class: 'muted' }, 'No upcoming reminders.'),
-  );
-}
-
-// ---------- Debug console ----------
-export function debug(store: AppStore): HTMLElement {
-  const trace = store.lastTrace;
-  const stageEls = trace
-    ? trace.stages.map((st) =>
-        h('details', { class: `stage st-${st.status}`, open: st.status === 'error' },
-          h('summary', {},
-            h('span', { class: 'stage-name' }, st.name),
-            h('span', { class: `badge ${st.status === 'ok' ? '' : 'warn'}` }, st.status),
-            h('span', { class: 'muted small' }, `${st.durationMs}ms`),
-            st.note ? h('span', { class: 'muted small note' }, ` · ${st.note}`) : null,
-          ),
-          h('pre', { class: 'json' }, safeJson(st.data)),
-        ),
-      )
-    : [h('p', { class: 'muted' }, 'Run a capture to populate the pipeline trace.')];
-
-  const rate = store.evalSink.acceptanceRate();
-  return h('div', { class: 'screen debug' },
-    h('h2', {}, 'Pipeline debug console'),
-    h('p', { class: 'muted small' }, 'Input → Normalize → Extract+Validate → Proposal → Accept → Commit'),
-    ...stageEls,
-    h('h3', {}, 'AI eval'),
-    h('div', { class: 'eval-summary' },
-      `extractions: ${store.evalSink.extractions.length} · outcomes: ${store.evalSink.outcomes.length} · acceptance: ${rate === null ? 'n/a' : (rate * 100).toFixed(0) + '%'}`,
-    ),
-    h('details', {}, h('summary', {}, 'Eval traces JSON'), h('pre', { class: 'json' }, safeJson(store.evalSink.extractions))),
-    h('h3', {}, 'Change ledger (undo source)'),
-    h('details', {}, h('summary', {}, `${store.ledger().length} entries`), h('pre', { class: 'json' }, safeJson(store.ledger()))),
-  );
-}
-
-// ---------- helpers ----------
-function field(label: string, control: Node): HTMLElement {
-  return h('label', { class: 'field-row' }, h('span', { class: 'field-label' }, label), control);
-}
-function line(label: string, value: string): HTMLElement {
-  return h('div', { class: 'ex-line' }, h('b', {}, `${label}: `), value);
-}
-function listLine(label: string, items: string[]): HTMLElement | null {
-  if (!items.length) return null;
-  return h('div', { class: 'ex-line' }, h('b', {}, `${label}: `), items.join(' · '));
-}
-function safeJson(v: unknown): string {
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return String(v);
-  }
-}
-function greeting(): string {
-  const hr = new Date().getHours();
-  return hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+function greeting(): string { const hr = new Date().getHours(); return hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'; }
+function friendlyToday(): string { return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }); }
+function friendlyDate(localDate: string): string {
+  const [y, m, d] = localDate.split('-').map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!)).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 function shiftDate(localDate: string, days: number): string {
   const [y, m, d] = localDate.split('-').map(Number);
@@ -314,12 +368,10 @@ function shiftDate(localDate: string, days: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 function humanRRule(rrule: string): string {
+  if (!rrule) return 'once';
   if (/FREQ=DAILY/.test(rrule)) return 'daily';
   if (/BYDAY=MO,TU,WE,TH,FR/.test(rrule)) return 'weekdays';
-  if (/FREQ=WEEKLY/.test(rrule)) {
-    const m = /BYDAY=([A-Z,]+)/.exec(rrule);
-    return m ? `weekly (${m[1]!.toLowerCase()})` : 'weekly';
-  }
+  if (/FREQ=WEEKLY/.test(rrule)) { const m = /BYDAY=([A-Z,]+)/.exec(rrule); return m ? `weekly · ${m[1]!.toLowerCase()}` : 'weekly'; }
   if (/FREQ=MONTHLY/.test(rrule)) return 'monthly';
-  return rrule;
+  return 'repeats';
 }

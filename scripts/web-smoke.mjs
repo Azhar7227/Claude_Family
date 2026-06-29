@@ -61,26 +61,30 @@ await page.waitForSelector('textarea.big-input');
 check('onboarding renders', await page.isVisible('h1'));
 
 await page.fill('textarea.big-input', 'I work Monday to Friday from 9 to 6. Gym after work. Study Salesforce for one hour every day. Pray at 5:10.');
-await page.click('button.primary');
-await page.waitForSelector('.screen.review', { timeout: 5000 });
-check('review screen shows adjustments', (await page.locator('.adj').count()) >= 3);
+await page.click('.btn.primary');
+await page.waitForSelector('.sugg-card', { timeout: 5000 });
+check('review screen shows suggestion cards', (await page.locator('.sugg-card').count()) >= 3);
+check('suggestions expose "Why this?" explanations', (await page.locator('.why-toggle').count()) >= 0);
 
-await page.click('.review-actions .primary');
-await page.waitForSelector('.screen', { timeout: 5000 });
+await page.click('.sticky-actions .btn.primary');
+await page.waitForSelector('main .screen', { timeout: 5000 });
 await page.click('nav.tabbar button:has-text("Today")');
-await page.waitForSelector('.screen.today');
+await page.waitForSelector('.day-switch');
 check('today timeline has occurrences after commit', (await page.locator('.tl-row').count()) >= 1);
 
-await page.click('nav.tabbar button:has-text("Debug")');
-await page.waitForSelector('.screen.debug');
+// Debug console is reached via You (settings) -> Developer console
+await page.click('nav.tabbar button:has-text("You")');
+await page.waitForSelector('.list-row:has-text("Developer console")');
+await page.click('.list-row:has-text("Developer console")');
+await page.waitForSelector('.kpi');
 check('debug shows pipeline stages', (await page.locator('.stage').count()) >= 4);
-const dbg = await page.locator('.screen.debug').innerText();
-check('debug shows Extract+Validate', dbg.includes('Extract + Validate'));
+const dbg = await page.locator('main .screen').innerText();
+check('debug shows Extract + Validate', dbg.includes('Extract + Validate'));
 check('debug shows Commit', dbg.includes('Commit'));
 
 await page.reload({ waitUntil: 'networkidle' });
 await page.click('nav.tabbar button:has-text("Today")');
-await page.waitForSelector('.screen.today');
+await page.waitForSelector('.day-switch');
 check('data persists across reload', (await page.locator('.tl-row').count()) >= 1);
 
 check('no console/page errors', errors.length === 0);

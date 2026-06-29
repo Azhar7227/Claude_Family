@@ -99,6 +99,9 @@ export class AppStore {
   nowIso(): string {
     return new Date().toISOString();
   }
+  todayLocalDate(): string {
+    return utcToLocalDate(this.nowIso(), this.settings.timezone);
+  }
 
   providerFor(method: CaptureInput['method']): AIProvider {
     return method === 'ics' ? new IcsExtractionProvider() : new DeterministicStubProvider();

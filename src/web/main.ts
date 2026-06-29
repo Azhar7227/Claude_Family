@@ -1,65 +1,64 @@
-/** App bootstrap: router, tab bar, and the re-render loop. */
+/** App bootstrap: shell, router, bottom nav with center FAB, re-render loop. */
 
 import { h, clear } from './dom.ts';
+import { icon } from './icons.ts';
 import { AppStore } from './store.ts';
 import * as views from './views.ts';
-import { utcToLocalDate } from '../engine/time.ts';
 
 const store = new AppStore();
 let route: views.Route = store.onboarded ? 'home' : 'add';
-let todayDate = utcToLocalDate(new Date().toISOString(), store.settings.timezone);
-
+let todayDate = store.todayLocalDate();
 const root = document.getElementById('app')!;
 
-const TABS: Array<{ id: views.Route; label: string; icon: string }> = [
-  { id: 'home', label: 'Home', icon: '◉' },
-  { id: 'today', label: 'Today', icon: '☰' },
-  { id: 'add', label: 'Add', icon: '＋' },
-  { id: 'routines', label: 'Routines', icon: '⟳' },
-  { id: 'notifications', label: 'Alerts', icon: '🔔' },
-  { id: 'settings', label: 'Settings', icon: '⚙' },
-  { id: 'debug', label: 'Debug', icon: '⌗' },
-];
-
 function setRoute(r: views.Route): void {
+  if (r === 'today') todayDate = store.todayLocalDate();
   route = r;
   render();
 }
 
 function content(): HTMLElement {
-  // A pending proposal always takes over the screen — review before anything commits.
   if (store.pendingProposal) return views.proposalReview(store, store.pendingProposal);
   if (!store.onboarded && store.tasks().length === 0) return views.onboarding(store);
-
   switch (route) {
     case 'home': return views.home(store);
     case 'today': return views.today(store, todayDate, (d) => { todayDate = d; render(); });
     case 'add': return views.add(store);
     case 'routines': return views.routines(store);
     case 'notifications': return views.notifications(store);
-    case 'settings': return views.settings(store);
+    case 'settings': return views.settings(store, () => setRoute('debug'));
     case 'debug': return views.debug(store);
   }
 }
 
-function tabBar(): HTMLElement {
-  return h('nav', { class: 'tabbar' },
-    ...TABS.map((t) =>
-      h('button', { class: `tab ${route === t.id && !store.pendingProposal ? 'active' : ''}`, onclick: () => setRoute(t.id) },
-        h('span', { class: 'tab-icon' }, t.icon),
-        h('span', { class: 'tab-label' }, t.label),
-      ),
+function appbar(): HTMLElement {
+  const missed = store.onboarded
+    ? store.today().timeline.filter((e) => e.status === 'missed').length
+    : 0;
+  return h('header', { class: 'appbar' },
+    h('span', { class: 'brand' }, h('span', { class: 'spark' }, icon('sparkles', 20)), 'LifeFlow'),
+    h('div', { class: 'appbar-actions' },
+      h('button', { class: `icon-btn ${missed ? 'dot-badge' : ''}`, onclick: () => setRoute('notifications'), 'aria-label': 'Reminders' }, icon('bell', 22)),
+      h('button', { class: 'icon-btn', onclick: () => setRoute('settings'), 'aria-label': 'Settings' }, icon('settings', 22)),
     ),
+  );
+}
+
+function tabbar(): HTMLElement {
+  const active = (r: views.Route) => (route === r && !store.pendingProposal ? 'active' : '');
+  const tab = (r: views.Route, label: string, ic: string) =>
+    h('button', { class: `tab ${active(r)}`, onclick: () => setRoute(r) }, icon(ic, 23), h('span', { class: 'tlabel' }, label));
+  return h('nav', { class: 'tabbar' },
+    tab('home', 'Home', 'home'),
+    tab('today', 'Today', 'today'),
+    h('button', { class: 'fab', onclick: () => setRoute('add'), 'aria-label': 'Add' }, icon('plus', 26)),
+    tab('routines', 'Routines', 'routines'),
+    tab('settings', 'You', 'settings'),
   );
 }
 
 function render(): void {
   clear(root);
-  root.append(
-    h('header', { class: 'appbar' }, h('span', { class: 'brand' }, 'LifeFlow'), h('span', { class: 'provider-tag' }, `provider: ${store.settings.provider}`)),
-    h('main', { class: 'content' }, content()),
-    tabBar(),
-  );
+  root.append(appbar(), h('main', { class: 'content' }, content()), tabbar());
 }
 
 store.subscribe(render);
