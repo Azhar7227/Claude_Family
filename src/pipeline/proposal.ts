@@ -13,9 +13,19 @@ import { reconcile, type DiffableTask } from '../engine/dedup.ts';
 import { detectConflicts, type Conflict, type PlacedItem } from '../engine/conflicts.ts';
 import { expandOccurrences } from '../engine/recurrence.ts';
 import { addDays, formatLocalDate, parseLocalDate } from '../engine/time.ts';
+import type { Explanation } from '../explain/types.ts';
 
-export type ProposalReason = 'initial_capture' | 'reimport' | 'conflict' | 'user_request';
-export type AdjustmentOp = 'add' | 'update' | 'move' | 'shorten' | 'remove';
+export type ProposalReason =
+  | 'initial_capture'
+  | 'reimport'
+  | 'conflict'
+  | 'user_request'
+  | 'missed_task'
+  | 'skipped_task'
+  | 'rescheduled_task'
+  | 'calendar_conflict'
+  | 'changed_work_hours';
+export type AdjustmentOp = 'add' | 'update' | 'move' | 'shorten' | 'remove' | 'skip';
 
 /** Provider-agnostic candidate task carried inside an Adjustment (pre-commit). */
 export interface CandidateTask {
@@ -32,13 +42,27 @@ export interface CandidateTask {
   timezone: IANATz;
 }
 
+/** Occurrence-level timing change carried by move/shorten/skip adjustments. */
+export interface OccurrenceChange {
+  occurrenceId: UUID;
+  taskId: UUID;
+  beforeStart: string; // ISO
+  beforeEnd: string; // ISO
+  afterStart: string; // ISO
+  afterEnd: string; // ISO
+}
+
 export interface Adjustment {
   op: AdjustmentOp;
-  /** tempId for 'add'; existing Task id for update/move/shorten/remove. */
+  /** tempId for 'add'; existing Task id for update/remove; occurrence id for move/shorten/skip. */
   targetRef: string;
   before?: CandidateTask;
   after?: CandidateTask;
+  /** Present on move/shorten/skip (occurrence-level edits from the maintenance engine). */
+  occurrenceChange?: OccurrenceChange;
   rationale: string;
+  /** Per-adjustment explanation (the five questions). */
+  explanation?: Explanation;
   /** Surfaced in the review UI; below-threshold items must be looked at. */
   lowConfidence?: boolean;
   changedFields?: string[];
@@ -59,6 +83,8 @@ export interface Proposal {
   acceptedRefs?: string[];
   /** Correlates to the ExtractionTrace in the eval framework (observability only). */
   traceId?: string;
+  /** Proposal-level explanation (rolls up the per-adjustment explanations). */
+  explanation?: Explanation;
 }
 
 export interface BuildContext {

@@ -21,10 +21,26 @@ which is testable in CI with zero network via a deterministic stub provider.
 |---|---|---|
 | `src/engine/recurrence.ts` | RFC 5545 RRULE subset → concrete occurrences (tz/DST-aware) | ✅ |
 | `src/engine/conflicts.ts` | Deterministic conflict detection (fixed > flexible, protected time) | ✅ |
+| `src/engine/replan.ts` | Day reflow — fit flexible items around frozen blocks, with decision trace | ✅ |
 | `src/engine/dedup.ts` | Re-import reconciliation (ADD/UPDATE/REMOVE/NOOP) — the "maintain" loop | ✅ |
 | `src/engine/reminders.ts` | Reminder fire-time computation + priority | ✅ |
 | `src/engine/notifications.ts` | Notification budget + batching (anti-fatigue) | ✅ |
 | `src/engine/time.ts` | Dependency-free local↔UTC / tz helpers (Intl) | ✅ |
+
+**Maintenance + explainability** — the retention loop; suggests, never mutates:
+
+| Module | Purpose | Tests |
+|---|---|---|
+| `src/maintenance/engine.ts` | Suggest-on-conflict engine → Proposal (6 triggers) | ✅ |
+| `src/explain/types.ts` | Explanation layer — the five questions, deterministic | ✅ |
+
+See [`docs/MAINTENANCE_ENGINE.md`](docs/MAINTENANCE_ENGINE.md).
+
+**Input sources** — all feed the one routine-creation pipeline:
+
+| Module | Purpose | Tests |
+|---|---|---|
+| `src/ingest/ics.ts` + `src/ai/ics-provider.ts` | Deterministic `.ics` import as an AIProvider (no model) | ✅ |
 
 **Daily experience (offline-first reads + actions):**
 
@@ -87,10 +103,12 @@ npm test            # node --test (no extra test framework)
 
 ## Build order
 
-See `docs/TECH_SPEC.md` §9. Done: deterministic engine (incl. reminders +
-notification budgeting); AI provider abstraction + stub; full text capture →
-proposal → accept → commit; Today read model + timeline; offline occurrence
-actions; image/OCR capture via the same pipeline; AI evaluation framework.
-Next up: `.ics` capture, the suggest-on-conflict maintenance loop as a
-first-class trigger, then a production Claude/Gemini/OpenAI adapter (only a new
-`AIProvider` — no pipeline changes).
+See `docs/TECH_SPEC.md` §9. Done: deterministic engine (recurrence, conflicts,
+reflow, reminders, notification budgeting); AI provider abstraction + stub; full
+text capture → proposal → accept → commit; Today read model + timeline; offline
+occurrence actions; image/OCR + `.ics` capture via the same pipeline; AI
+evaluation framework; **suggest-on-conflict maintenance engine with the
+explainability layer**.
+
+Next: a production Claude/Gemini/OpenAI adapter — only a new `AIProvider`
+implementation, no orchestration or business-logic changes.

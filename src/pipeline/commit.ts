@@ -33,6 +33,10 @@ export interface LedgerEntry {
   taskId: UUID;
   before?: CandidateTask;
   after?: CandidateTask;
+  /** Set for occurrence-level ops (move/shorten/skip) for undo + the "why" UI. */
+  occurrenceId?: UUID;
+  beforeStart?: string;
+  afterStart?: string;
   at: string; // ISO
 }
 
@@ -167,11 +171,49 @@ export function commit(proposal: Proposal, repo: Repository, ctx: CommitContext)
       repo.removeTask(taskId);
       result.removedTaskIds.push(taskId);
       result.ledgerEntryIds.push(appendLedger(repo, ctx, proposal.id, 'remove', taskId, adj.before, undefined));
+    } else if (adj.op === 'move' || adj.op === 'shorten') {
+      // occurrence-level edit from the maintenance engine
+      const oc = adj.occurrenceChange!;
+      const existing = repo.getOccurrence(oc.occurrenceId);
+      repo.updateOccurrence(oc.occurrenceId, {
+        start: oc.afterStart,
+        end: oc.afterEnd,
+        status: 'moved',
+        // preserve the true prior start: an earlier move's original, else where it actually was
+        originalStart: existing?.originalStart ?? existing?.start ?? oc.beforeStart,
+      });
+      result.updatedTaskIds.push(oc.taskId);
+      result.ledgerEntryIds.push(appendOccurrenceLedger(repo, ctx, proposal.id, adj.op, oc));
+    } else if (adj.op === 'skip') {
+      const oc = adj.occurrenceChange!;
+      repo.updateOccurrence(oc.occurrenceId, { status: 'skipped' });
+      result.updatedTaskIds.push(oc.taskId);
+      result.ledgerEntryIds.push(appendOccurrenceLedger(repo, ctx, proposal.id, 'skip', oc));
     }
-    // 'move' / 'shorten' are occurrence-level edits handled by the maintenance loop (later slice).
   }
 
   return result;
+}
+
+function appendOccurrenceLedger(
+  repo: Repository,
+  ctx: CommitContext,
+  proposalId: UUID,
+  op: Adjustment['op'],
+  oc: { occurrenceId: UUID; taskId: UUID; beforeStart: string; afterStart: string },
+): UUID {
+  const id = ctx.idGen();
+  repo.appendLedger({
+    id,
+    proposalId,
+    op,
+    taskId: oc.taskId,
+    occurrenceId: oc.occurrenceId,
+    beforeStart: oc.beforeStart,
+    afterStart: oc.afterStart,
+    at: ctx.now(),
+  });
+  return id;
 }
 
 function appendLedger(

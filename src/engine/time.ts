@@ -103,6 +103,19 @@ export function toISO(utcMs: number): string {
   return new Date(utcMs).toISOString();
 }
 
+/** Local wall-clock time ("HH:mm") of a UTC instant, as seen in `tz`. */
+export function utcToLocalHHmm(iso: string, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(Date.parse(iso)));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  const h = get('hour') === '24' ? '00' : get('hour');
+  return `${h}:${get('minute')}`;
+}
+
 /** Local calendar date ("YYYY-MM-DD") of a UTC instant, as seen in `tz`. */
 export function utcToLocalDate(iso: string, tz: string): string {
   const dtf = new Intl.DateTimeFormat('en-CA', {
