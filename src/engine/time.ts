@@ -102,3 +102,15 @@ export function parseHHmm(s: string): { h: number; min: number } {
 export function toISO(utcMs: number): string {
   return new Date(utcMs).toISOString();
 }
+
+/** Local calendar date ("YYYY-MM-DD") of a UTC instant, as seen in `tz`. */
+export function utcToLocalDate(iso: string, tz: string): string {
+  const dtf = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  // en-CA formats as YYYY-MM-DD
+  return dtf.format(new Date(Date.parse(iso)));
+}

@@ -39,14 +39,22 @@ export class DeterministicStubProvider implements AIProvider {
   readonly capabilities: ReadonlySet<Capability> = new Set<Capability>(['structured_output', 'ocr', 'vision']);
 
   async generateStructured(req: StructuredRequest): Promise<StructuredResult> {
-    const text = req.input
-      .filter((p) => p.kind === 'text' && p.text)
-      .map((p) => p.text!)
-      .join('\n')
-      // for image/audio parts, the stub treats any provided OCR text the same way
-      .concat(req.input.filter((p) => p.kind !== 'text').map(() => '').join(''));
-
-    const raw = parseToExtraction(text);
+    // Collect text from text parts AND from image/audio parts that carry inline
+    // base64. A real vision/voice provider interprets the bytes; the deterministic
+    // stub decodes base64-as-UTF8 so the image/voice capture path is testable
+    // end-to-end with no model. (Documented test affordance.)
+    const chunks: string[] = [];
+    for (const p of req.input) {
+      if (p.kind === 'text' && p.text) chunks.push(p.text);
+      else if (p.media?.base64) {
+        try {
+          chunks.push(Buffer.from(p.media.base64, 'base64').toString('utf8'));
+        } catch {
+          /* unreadable media -> contributes nothing, yields a warning downstream */
+        }
+      }
+    }
+    const raw = parseToExtraction(chunks.join('\n'));
     return {
       raw,
       meta: {

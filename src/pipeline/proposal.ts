@@ -57,6 +57,8 @@ export interface Proposal {
   createdAt: string; // ISO
   /** When partially accepted, which adjustment targetRefs were accepted. */
   acceptedRefs?: string[];
+  /** Correlates to the ExtractionTrace in the eval framework (observability only). */
+  traceId?: string;
 }
 
 export interface BuildContext {
@@ -70,6 +72,8 @@ export interface BuildContext {
   now: () => string;
   /** Days ahead to expand occurrences for proposal-time conflict detection. */
   conflictWindowDays?: number;
+  /** Observability correlation id; carried onto the Proposal, no logic impact. */
+  traceId?: string;
 }
 
 const DEFAULT_PRIORITY: CandidateTask['priority'] = 3;
@@ -179,6 +183,7 @@ export function buildProposal(extraction: ExtractionResult, ctx: BuildContext): 
     ambiguities: extraction.ambiguities,
     status: 'proposed',
     createdAt: ctx.now(),
+    traceId: ctx.traceId,
   };
 }
 

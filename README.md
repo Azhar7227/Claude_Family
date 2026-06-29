@@ -22,7 +22,24 @@ which is testable in CI with zero network via a deterministic stub provider.
 | `src/engine/recurrence.ts` | RFC 5545 RRULE subset → concrete occurrences (tz/DST-aware) | ✅ |
 | `src/engine/conflicts.ts` | Deterministic conflict detection (fixed > flexible, protected time) | ✅ |
 | `src/engine/dedup.ts` | Re-import reconciliation (ADD/UPDATE/REMOVE/NOOP) — the "maintain" loop | ✅ |
+| `src/engine/reminders.ts` | Reminder fire-time computation + priority | ✅ |
+| `src/engine/notifications.ts` | Notification budget + batching (anti-fatigue) | ✅ |
 | `src/engine/time.ts` | Dependency-free local↔UTC / tz helpers (Intl) | ✅ |
+
+**Daily experience (offline-first reads + actions):**
+
+| Module | Purpose | Tests |
+|---|---|---|
+| `src/read/today.ts` | Today view (now/next/after/remaining) + timeline projection | ✅ |
+| `src/pipeline/occurrence-actions.ts` | complete / skip / reschedule / mark-missed | ✅ |
+
+**AI Evaluation Framework (observability, never affects logic):**
+
+| Module | Purpose | Tests |
+|---|---|---|
+| `src/eval/sink.ts` | `EvalSink` port + Noop/InMemory impls; extraction traces & outcomes | ✅ |
+
+See [`docs/EVAL_FRAMEWORK.md`](docs/EVAL_FRAMEWORK.md).
 
 **AI layer (dependency-inverted)** — business logic depends on a port, never a vendor:
 
@@ -70,7 +87,10 @@ npm test            # node --test (no extra test framework)
 
 ## Build order
 
-See `docs/TECH_SPEC.md` §9. Done: deterministic engine; AI provider abstraction
-+ stub; full text capture → proposal → accept → commit. Next up: wire a real
-model provider behind the same port, then add image/OCR and `.ics` capture
-(same pipeline, new `InputPart`s), then reminders + the Today read path.
+See `docs/TECH_SPEC.md` §9. Done: deterministic engine (incl. reminders +
+notification budgeting); AI provider abstraction + stub; full text capture →
+proposal → accept → commit; Today read model + timeline; offline occurrence
+actions; image/OCR capture via the same pipeline; AI evaluation framework.
+Next up: `.ics` capture, the suggest-on-conflict maintenance loop as a
+first-class trigger, then a production Claude/Gemini/OpenAI adapter (only a new
+`AIProvider` — no pipeline changes).

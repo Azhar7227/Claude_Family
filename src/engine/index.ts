@@ -10,6 +10,8 @@
 export * from './recurrence.ts';
 export * from './conflicts.ts';
 export * from './dedup.ts';
+export * from './reminders.ts';
+export * from './notifications.ts';
 export {
   type LocalDate,
   type WeekdayCode,

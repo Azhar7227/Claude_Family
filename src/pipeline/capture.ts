@@ -12,7 +12,7 @@ import type { InputPart } from '../ai/provider.ts';
 
 export type CaptureInput =
   | { method: 'text'; text: string }
-  | { method: 'image'; uploadId: string; mimeType: string; ocrText?: string }
+  | { method: 'image'; uploadId: string; mimeType: string; ocrText?: string; base64?: string }
   | { method: 'ics'; uploadId: string; icsText?: string };
 
 export interface NormalizeContext {
@@ -42,7 +42,7 @@ export function normalize(input: CaptureInput, ctx: NormalizeContext): Normalize
       // a vision/ocr-capable provider as an image part. Orchestration is identical.
       const parts: InputPart[] = input.ocrText
         ? [{ kind: 'text', text: input.ocrText }]
-        : [{ kind: 'image', media: { uploadId: input.uploadId, mimeType: input.mimeType } }];
+        : [{ kind: 'image', media: { uploadId: input.uploadId, mimeType: input.mimeType, base64: input.base64 } }];
       return { ...base, parts };
     }
     case 'ics': {

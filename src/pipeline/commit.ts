@@ -45,6 +45,8 @@ export interface Repository {
   updateTask(id: UUID, patch: Partial<Task>): void;
   updateRecurrenceByTask(taskId: UUID, patch: Partial<RecurrenceRule>): void;
   removeTask(id: UUID): void;
+  getOccurrence(id: UUID): Occurrence | undefined;
+  updateOccurrence(id: UUID, patch: Partial<Occurrence>): void;
   appendLedger(entry: LedgerEntry): void;
 }
 
@@ -219,6 +221,13 @@ export class InMemoryRepository implements Repository {
     for (let i = this.occurrences.length - 1; i >= 0; i--) {
       if (this.occurrences[i]!.taskId === id) this.occurrences.splice(i, 1);
     }
+  }
+  getOccurrence(id: UUID): Occurrence | undefined {
+    return this.occurrences.find((o) => o.id === id);
+  }
+  updateOccurrence(id: UUID, patch: Partial<Occurrence>): void {
+    const idx = this.occurrences.findIndex((o) => o.id === id);
+    if (idx >= 0) this.occurrences[idx] = { ...this.occurrences[idx]!, ...patch };
   }
   appendLedger(entry: LedgerEntry): void {
     this.ledger.push(entry);
