@@ -10,6 +10,7 @@
  */
 
 import type { Category, TaskType } from '../domain/types.ts';
+import { base64ToUtf8 } from '../util/base64.ts';
 import type { AIProvider, Capability, StructuredRequest, StructuredResult } from './provider.ts';
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -48,7 +49,7 @@ export class DeterministicStubProvider implements AIProvider {
       if (p.kind === 'text' && p.text) chunks.push(p.text);
       else if (p.media?.base64) {
         try {
-          chunks.push(Buffer.from(p.media.base64, 'base64').toString('utf8'));
+          chunks.push(base64ToUtf8(p.media.base64));
         } catch {
           /* unreadable media -> contributes nothing, yields a warning downstream */
         }

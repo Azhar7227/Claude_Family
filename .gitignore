@@ -5,3 +5,6 @@ dist/
 .env
 .env.*
 coverage/
+# built web bundle (produced by `npm run build:web`)
+public/bundle.js
+public/bundle.js.map

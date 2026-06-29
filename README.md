@@ -101,6 +101,26 @@ npm run typecheck   # tsc --noEmit
 npm test            # node --test (no extra test framework)
 ```
 
+## Run the app
+
+A real PWA (`src/web/`) that drives the **actual deterministic pipeline** in the
+browser — offline-first via localStorage, stub provider by default.
+
+```bash
+npm run web         # esbuild dev server + watch (serves /public)
+npm run build:web   # one-off bundle -> public/bundle.js
+npm run smoke:web   # headless browser smoke test of the full flow
+```
+
+Screens: onboarding, Home ("what now?"), Today/timeline, Add (text + `.ics`),
+proposal review (with explanations), Routines editor, Settings (reminder/
+notification prefs), Alerts (notification budget), and a **pipeline debug
+console** visualizing Input → Normalize → Extract+Validate → Proposal → Accept →
+Commit with each stage's JSON, validation status, confidence, and timing.
+
+**Milestone in progress:** run our own daily routines in the app for 30
+consecutive days before adding a production AI provider.
+
 ## Build order
 
 See `docs/TECH_SPEC.md` §9. Done: deterministic engine (recurrence, conflicts,
