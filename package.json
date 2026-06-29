@@ -12,7 +12,8 @@
     "test": "node --test --experimental-strip-types 'src/**/*.test.ts'",
     "build:web": "esbuild src/web/main.ts --bundle --format=esm --outfile=public/bundle.js --sourcemap",
     "web": "esbuild src/web/main.ts --bundle --format=esm --outfile=public/bundle.js --sourcemap --servedir=public --watch",
-    "smoke:web": "node scripts/web-smoke.mjs"
+    "smoke:web": "node scripts/web-smoke.mjs",
+    "bench": "node --experimental-strip-types bench/run.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

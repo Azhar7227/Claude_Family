@@ -8,3 +8,5 @@ coverage/
 # built web bundle (produced by `npm run build:web`)
 public/bundle.js
 public/bundle.js.map
+# regenerated benchmark machine output (report.md is committed as the baseline)
+bench/report.json

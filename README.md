@@ -64,7 +64,20 @@ See [`docs/EVAL_FRAMEWORK.md`](docs/EVAL_FRAMEWORK.md).
 | `src/ai/provider.ts` | `AIProvider` PORT + capabilities (vision/ocr/audio/tools) | — |
 | `src/ai/schema.ts` | Validation boundary — every AI response validated before the Proposal engine | ✅ |
 | `src/ai/stub-provider.ts` | Deterministic stub (realistic structured output, no network) | ✅ |
+| `src/ai/providers/{anthropic,openai,gemini}.ts` | Production adapters (same interface, same schema) | ✅ |
+| `src/ai/registry.ts` | Config-only provider selection (`LIFEFLOW_PROVIDER`) + pricing | ✅ |
 | `src/ai/extraction.ts` | Provider-agnostic extraction service | ✅ (flow) |
+
+**Production AI is config-only.** `createProviderFromEnv()` returns the
+configured `AIProvider`; nothing downstream knows the vendor. Default is `stub`.
+Switch with one line: `LIFEFLOW_PROVIDER=gemini` (+ `GEMINI_API_KEY`). See
+[`docs/AI_PROVIDER_COMPARISON.md`](docs/AI_PROVIDER_COMPARISON.md) — recommended
+default **Gemini Flash** (OCR/cost/latency), Claude/GPT first-class fallbacks.
+
+**Benchmark** (`npm run bench`): runs 100+ messy routine descriptions through
+every configured provider (stub always) and measures item-F1, field accuracy,
+confidence calibration (ECE), validation failures, tokens, cost, and latency →
+[`bench/report.md`](bench/report.md). Add a model later: set its API key, re-run.
 
 **Pipeline** — capture → extract → validate → propose → accept → commit:
 
