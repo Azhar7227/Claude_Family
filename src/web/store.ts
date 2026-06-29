@@ -29,6 +29,9 @@ import { computeReminderFires, type RemindableOccurrence } from '../engine/remin
 import { planNotifications, type NotificationPlan } from '../engine/notifications.ts';
 import { buildMaintenanceProposal, type MaintenanceTrigger, type ReplanItem } from '../maintenance/engine.ts';
 import { utcToLocalDate } from '../engine/time.ts';
+import { DurableStore, type KVStore } from './storage.ts';
+import { apiExtract, apiHealth } from './api.ts';
+import { validateExtractionResult } from '../ai/schema.ts';
 
 export interface Settings {
   timezone: string;
@@ -37,6 +40,20 @@ export interface Settings {
   batchWindowMin: number;
   dayEndLocal: string;
   provider: 'stub';
+}
+
+export interface AiStatus {
+  online: boolean;
+  provider: string;
+  model?: string;
+}
+
+/** Minimal notifier surface the UI calls; implemented by ReminderNotifier (DOM). */
+export interface NotifierLike {
+  supported(): boolean;
+  granted(): boolean;
+  enable(): Promise<boolean>;
+  start(): void;
 }
 
 export interface StageRecord {
@@ -53,7 +70,6 @@ export interface PipelineTrace {
   stages: StageRecord[];
 }
 
-const LS_KEY = 'lifeflow.v1';
 
 function uuid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -81,9 +97,15 @@ export class AppStore {
   lastTrace: PipelineTrace | null = null;
   evalSink = new InMemoryEvalSink();
   onboarded = false;
+  recovery: { recovered: boolean; source: string } = { recovered: false, source: 'primary' };
+  aiStatus: AiStatus = { online: false, provider: 'stub' };
+  notifier?: NotifierLike;
   private listeners = new Set<() => void>();
+  private durable: DurableStore;
 
-  constructor() {
+  constructor(kv?: KVStore) {
+    const backend = kv ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    this.durable = new DurableStore(backend ?? memoryKV());
     this.load();
   }
 
@@ -129,12 +151,19 @@ export class AppStore {
     try {
       trace.stages.push({ name: 'Input', status: 'ok', durationMs: 0, data: input });
       const doc = await timed('Normalize', () => normalize(input, { referenceDate, timezone: tz }));
-      const provider = this.providerFor(input.method);
       const traceId = idGen();
-      const extractOut = await timed('Extract + Validate', () =>
-        extract(provider, { parts: doc.parts }, { sink: this.evalSink, traceId, inputMethod: doc.method, now: () => this.nowIso() }),
-      );
-      const extraction: ExtractionResult = extractOut.result;
+      // .ics is always parsed on-device (deterministic). Free text/image use the
+      // production AI proxy when online; otherwise fall back to the on-device stub.
+      const useProxy = input.method !== 'ics' && this.aiStatus.online;
+      const extraction: ExtractionResult = await timed('Extract + Validate', async () => {
+        if (useProxy) {
+          const { result } = await apiExtract(doc.parts);
+          return validateExtractionResult(result); // re-validate client-side; never trust the wire
+        }
+        const provider = this.providerFor(input.method);
+        const out = await extract(provider, { parts: doc.parts }, { sink: this.evalSink, traceId, inputMethod: doc.method, now: () => this.nowIso() });
+        return out.result;
+      });
       const proposal = await timed('Proposal', () =>
         buildProposal(extraction, {
           spaceId: 'me',
@@ -304,10 +333,38 @@ export class AppStore {
     this.emit();
   }
 
-  // ---- Persistence ----
-  private save(): void {
-    if (typeof localStorage === 'undefined') return;
-    const data = {
+  // ---- AI proxy status ----
+  /** Probe the local AI proxy; sets aiStatus. Falls back to on-device stub if offline. */
+  async checkAi(): Promise<void> {
+    const health = await apiHealth();
+    this.aiStatus = health && health.provider !== 'stub'
+      ? { online: true, provider: health.provider, model: health.model }
+      : { online: false, provider: 'stub' };
+    for (const fn of this.listeners) fn();
+  }
+
+  // ---- Backup / export / import (data safety) ----
+  exportData(): string {
+    return this.durable.exportString();
+  }
+  downloadFilename(): string {
+    return `lifeflow-backup-${this.todayLocalDate()}.json`;
+  }
+  importData(json: string): { ok: boolean; error?: string } {
+    const res = this.durable.importString(json, isLifeflowData);
+    if (res.ok) {
+      this.load();
+      for (const fn of this.listeners) fn();
+    }
+    return res;
+  }
+  backupInfo(): { lastSavedAt: string | null; snapshots: number } {
+    return { lastSavedAt: this.durable.lastSavedAt(), snapshots: this.durable.snapshotInfo().length };
+  }
+
+  // ---- Persistence (durable: primary + backup + snapshots) ----
+  private serialize(): LifeflowData {
+    return {
       onboarded: this.onboarded,
       settings: this.settings,
       tasks: [...this.repo.tasks.values()],
@@ -315,26 +372,42 @@ export class AppStore {
       occurrences: this.repo.occurrences,
       ledger: this.repo.ledger,
     };
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
+  }
+  private save(): void {
+    this.durable.save(this.serialize());
   }
   private load(): void {
-    if (typeof localStorage === 'undefined') return;
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return;
-    try {
-      const data = JSON.parse(raw);
-      this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
-      this.onboarded = Boolean(data.onboarded);
-      const repo = new InMemoryRepository();
-      for (const t of data.tasks ?? []) repo.addTask(t);
-      for (const r of data.recurrences ?? []) repo.addRecurrence(r);
-      repo.addOccurrences(data.occurrences ?? []);
-      for (const l of data.ledger ?? []) repo.appendLedger(l);
-      this.repo = repo;
-    } catch {
-      /* corrupt store -> start fresh */
-    }
+    const result = this.durable.load<LifeflowData>();
+    this.recovery = { recovered: result.recovered, source: result.source };
+    const data = result.data;
+    if (!data) return;
+    this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
+    this.onboarded = Boolean(data.onboarded);
+    const repo = new InMemoryRepository();
+    for (const t of data.tasks ?? []) repo.addTask(t);
+    for (const r of data.recurrences ?? []) repo.addRecurrence(r);
+    repo.addOccurrences(data.occurrences ?? []);
+    for (const l of data.ledger ?? []) repo.appendLedger(l);
+    this.repo = repo;
   }
+}
+
+interface LifeflowData {
+  onboarded: boolean;
+  settings: Settings;
+  tasks: Task[];
+  recurrences: RecurrenceRule[];
+  occurrences: Occurrence[];
+  ledger: LedgerEntry[];
+}
+
+function isLifeflowData(d: unknown): boolean {
+  return !!d && typeof d === 'object' && Array.isArray((d as LifeflowData).tasks) && Array.isArray((d as LifeflowData).occurrences);
+}
+
+function memoryKV(): KVStore {
+  const m = new Map<string, string>();
+  return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) };
 }
 
 function round(n: number): number {

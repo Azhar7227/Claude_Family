@@ -1,6 +1,6 @@
 /** Premium screen renderers — calm, card-based, one-tap, progressive disclosure. */
 
-import { h } from './dom.ts';
+import { h, showSheet } from './dom.ts';
 import { icon, categoryIcon } from './icons.ts';
 import type { AppStore } from './store.ts';
 import type { Proposal, Adjustment } from '../pipeline/proposal.ts';
@@ -222,8 +222,8 @@ export function routines(store: AppStore): HTMLElement {
           h('div', { class: 'ltitle' }, t.title, h('span', { class: 'tag' }, t.type)),
           h('div', { class: 'lsub' }, r ? `${r.startTimeLocal ?? 'anytime'} · ${humanRRule(r.rrule)}` : 'one-off'),
         ),
-        h('button', { class: 'row-act', onclick: () => { const n = prompt('Rename', t.title); if (n) store.renameTask(t.id, n); } }, icon('edit', 18)),
-        h('button', { class: 'row-act danger', onclick: () => { if (confirm(`Delete “${t.title}”?`)) store.deleteTask(t.id); } }, icon('trash', 18)),
+        h('button', { class: 'row-act', onclick: async () => { const n = await showSheet({ title: 'Rename task', input: { value: t.title }, confirmText: 'Save' }); if (n) store.renameTask(t.id, n); } }, icon('edit', 18)),
+        h('button', { class: 'row-act danger', onclick: async () => { const r = await showSheet({ title: `Delete “${t.title}”?`, message: 'Removes the task and its upcoming occurrences.', confirmText: 'Delete', danger: true }); if (r !== null) store.deleteTask(t.id); } }, icon('trash', 18)),
       );
     })));
   }
@@ -231,7 +231,7 @@ export function routines(store: AppStore): HTMLElement {
 }
 
 // ============================ Settings ============================
-export function settings(store: AppStore, openDebug: () => void): HTMLElement {
+export function settings(store: AppStore): HTMLElement {
   const s = store.settings;
   const OFFSETS = [0, 5, 10, 15, 30, 60];
   const offsetChips = h('div', { class: 'example-chips' }, ...OFFSETS.map((o) =>
@@ -241,26 +241,74 @@ export function settings(store: AppStore, openDebug: () => void): HTMLElement {
       store.updateSettings({ reminderOffsetsMin: [...set].sort((a, b) => b - a) });
     } }, o === 0 ? 'on time' : `${o}m`)));
 
+  const ai = store.aiStatus;
+  const backup = store.backupInfo();
+  const lastSaved = backup.lastSavedAt ? new Date(backup.lastSavedAt).toLocaleString() : 'never';
+  const notifier = store.notifier;
+  const notifGranted = notifier?.granted() ?? false;
+
   return h('div', { class: 'screen' },
     h('h2', {}, 'You'),
+
+    h('h3', {}, 'Intelligence'),
+    h('div', { class: 'group' },
+      h('div', { class: 'list-row' },
+        h('span', { class: 'lead', style: `color:${ai.online ? 'var(--ok)' : 'var(--muted)'}` }, icon('sparkles', 18)),
+        h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, ai.online ? `AI connected · ${ai.provider}` : 'On-device parsing'), h('div', { class: 'lsub' }, ai.online ? 'Capture uses the production model' : 'Run the local server for full AI')),
+        h('span', { class: `badge ${ai.online ? 'ok' : ''}` }, ai.online ? 'live' : 'offline'),
+      ),
+    ),
+
     h('h3', {}, 'Your day'),
     h('div', { class: 'group' },
       listRow('today', 'Time zone', s.timezone),
       listRowControl('moon', 'Day ends at', stepperTime(store, s.dayEndLocal)),
     ),
+
     h('h3', {}, 'Reminders'),
     h('div', { class: 'group' },
-      h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon('bell', 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, 'Remind me'), h('div', { class: 'lsub' }, 'before each task'))),
+      notifier?.supported()
+        ? rowButton(notifGranted ? 'check' : 'bell', notifGranted ? 'Notifications on' : 'Turn on notifications', async () => { await notifier!.enable(); store.updateSettings({}); }, false)
+        : h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon('bell', 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, 'Notifications unsupported'))),
+      h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon('clock', 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, 'Remind me before'), h('div', { class: 'lsub' }, 'minutes ahead of each task'))),
       h('div', { style: 'padding:0 16px 16px' }, offsetChips),
       listRowControl('bell', 'Max per day', stepper(store, 'maxPerDay', s.maxPerDay, 1, 30)),
       listRowControl('clock', 'Batch window', stepper(store, 'batchWindowMin', s.batchWindowMin, 0, 120, 5, 'm')),
     ),
-    h('h3', {}, 'Data'),
+
+    h('h3', {}, 'Backup & data'),
     h('div', { class: 'group' },
-      rowButton('doc', 'Developer console', openDebug),
-      rowButton('trash', 'Reset all data', () => { if (confirm('Erase everything?')) store.reset(); }, true),
+      h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon('check', 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, 'Auto-saved'), h('div', { class: 'lsub' }, `last save ${lastSaved} · ${backup.snapshots} restore points`))),
+      rowButton('doc', 'Export backup file', () => downloadBackup(store)),
+      rowButton('arrowRight', 'Import / restore', () => importBackup(store)),
+      rowButton('trash', 'Reset all data', async () => { const r = await showSheet({ title: 'Erase everything?', message: 'Export a backup first if unsure. This cannot be undone.', confirmText: 'Erase', danger: true }); if (r !== null) store.reset(); }, true),
     ),
+    h('p', { class: 'small muted', style: 'text-align:center' }, 'Tip: export a backup weekly so you never fear losing your routine.'),
   );
+}
+
+function downloadBackup(store: AppStore): void {
+  const blob = new Blob([store.exportData()], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: store.downloadFilename() });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function importBackup(store: AppStore): void {
+  const input = h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none' });
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const res = store.importData(text);
+    await showSheet({ title: res.ok ? 'Restored' : 'Could not import', message: res.ok ? 'Your routine has been restored from the backup.' : res.error ?? 'Unknown error', confirmText: 'OK' });
+    input.remove();
+  });
+  document.body.append(input);
+  input.click();
 }
 
 // ============================ Notifications ============================

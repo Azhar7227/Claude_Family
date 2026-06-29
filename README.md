@@ -116,14 +116,22 @@ npm test            # node --test (no extra test framework)
 
 ## Run the app
 
-A real PWA (`src/web/`) that drives the **actual deterministic pipeline** in the
-browser — offline-first via localStorage, stub provider by default.
+A real offline-first PWA (`src/web/`) driving the **actual pipeline**. Data is
+stored durably (primary + backup + rolling snapshots) with crash recovery and
+file export/import — designed so you can rely on it daily without fear of loss.
 
 ```bash
-npm run web         # esbuild dev server + watch (serves /public)
+npm run web         # esbuild dev server + watch (on-device stub AI)
+npm run serve       # build + local server with the PRODUCTION AI proxy
+                    #   LIFEFLOW_PROVIDER=gemini GEMINI_API_KEY=... npm run serve
 npm run build:web   # one-off bundle -> public/bundle.js
 npm run smoke:web   # headless browser smoke test of the full flow
 ```
+
+**AI:** the browser never holds API keys. With `npm run serve` + a provider key,
+extraction runs through the local proxy (`server/index.ts`) and the app shows
+"AI connected"; otherwise it falls back to the on-device deterministic stub so
+capture always works offline. See [`docs/BETA_READINESS.md`](docs/BETA_READINESS.md).
 
 Screens: onboarding, Home ("what now?"), Today/timeline, Add (text + `.ics`),
 proposal review (with explanations), Routines editor, Settings (reminder/

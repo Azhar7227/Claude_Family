@@ -239,6 +239,22 @@ textarea.big-input:focus, .field-input:focus { outline: none; border-color: var(
   color: #fff; display: grid; place-items: center; box-shadow: 0 12px 26px -8px var(--accent); transition: transform .12s; }
 .fab:active { transform: scale(.92) rotate(90deg); }
 
+/* modal sheet */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(3px); display: flex; align-items: flex-end; justify-content: center; opacity: 0; transition: opacity .18s; z-index: 50; }
+.overlay.open { opacity: 1; }
+.sheet { width: 100%; max-width: 460px; background: var(--surface); border-radius: var(--r-lg) var(--r-lg) 0 0; padding: var(--s5) var(--s5) calc(var(--s5) + env(safe-area-inset-bottom)); transform: translateY(20px); transition: transform .22s cubic-bezier(.22,.61,.36,1); box-shadow: 0 -10px 40px -12px rgba(0,0,0,.5); }
+.overlay.open .sheet { transform: none; }
+.sheet-title { font-size: 18px; font-weight: 680; }
+.sheet-msg { color: var(--text-2); font-size: 14px; margin: 6px 0 0; }
+.sheet .field-input { margin-top: 14px; }
+.sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
+.sheet-actions .btn { flex: 1; }
+.btn.danger-solid { background: var(--danger); color: #fff; }
+
+/* recovery banner */
+.recovery-banner { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 14px; border-radius: var(--r-md); background: var(--ok-soft); color: var(--ok); font-size: 13px; }
+.recovery-banner .x { margin-left: auto; background: none; color: inherit; opacity: .7; padding: 4px 8px; }
+
 /* onboarding */
 .onb-hero { text-align: center; padding: var(--s6) 0 var(--s4); display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .onb-mark { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }

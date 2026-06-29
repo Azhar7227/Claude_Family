@@ -72,10 +72,8 @@ await page.click('nav.tabbar button:has-text("Today")');
 await page.waitForSelector('.day-switch');
 check('today timeline has occurrences after commit', (await page.locator('.tl-row').count()) >= 1);
 
-// Debug console is reached via You (settings) -> Developer console
-await page.click('nav.tabbar button:has-text("You")');
-await page.waitForSelector('.list-row:has-text("Developer console")');
-await page.click('.list-row:has-text("Developer console")');
+// Developer console is intentionally hidden from the consumer surface (gated behind #debug)
+await page.evaluate(() => { location.hash = '#debug'; });
 await page.waitForSelector('.kpi');
 check('debug shows pipeline stages', (await page.locator('.stage').count()) >= 4);
 const dbg = await page.locator('main .screen').innerText();
