@@ -8,14 +8,13 @@ Read this first before creating or moving any AgentOS file.
 All AgentOS files live in this OneDrive folder:
 
 ```
-OneDrive - RealPage, Inc.\AgentOS
+OneDrive - RealPage\AgentOS
 ```
 
-On my machine the full path looks like this (replace `<me>` with my Windows
-user name):
+On my machine the full path is:
 
 ```
-C:\Users\<me>\OneDrive - RealPage, Inc.\AgentOS
+C:\Users\amohammad\OneDrive - RealPage\AgentOS
 ```
 
 This is the single home for AgentOS. Everything — start-here notes,
@@ -23,7 +22,7 @@ workflows, prompts, outputs — sits under this one folder.
 
 ## The one rule
 
-**Every AgentOS file must stay inside `OneDrive - RealPage, Inc.\AgentOS`.**
+**Every AgentOS file must stay inside `OneDrive - RealPage\AgentOS`.**
 
 - Do not save AgentOS files to the Desktop, Downloads, `C:\Temp`, or any
   folder that is not synced by OneDrive.
@@ -58,7 +57,7 @@ lives in OneDrive.
 Before I start working, confirm the folder is really in OneDrive and not a
 local-only copy:
 
-1. **Look at the path.** It must start with `OneDrive - RealPage, Inc.`
+1. **Look at the path.** It must start with `OneDrive - RealPage`.
    If the path starts with something like `C:\Users\<me>\Desktop` or
    `C:\Temp`, stop — that is a local-only folder.
 2. **Look at the sync icon.** In File Explorer the AgentOS folder and its
@@ -69,4 +68,4 @@ local-only copy:
    the files never left my machine.
 
 If any of these fail, I am building from a local-only folder. Move the work
-into `OneDrive - RealPage, Inc.\AgentOS` before continuing.
+into `OneDrive - RealPage\AgentOS` before continuing.
