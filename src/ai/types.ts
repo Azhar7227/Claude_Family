@@ -1,32 +1,69 @@
 /**
- * AI extraction contract types (TECH_SPEC §3).
+ * AI extraction contract types (TECH_SPEC §3) — ontology v2.
  *
- * This is the ONLY shape the orchestration layer accepts from any AI provider.
- * Providers emit raw JSON; it is validated into these types at the boundary
- * (see schema.ts) before anything reaches the Proposal engine.
+ * The v1 schema modelled only "tasks", so the model crammed everything into a
+ * task title (profile facts, goals, habit counts, time-of-day bands). v2 gives
+ * the extractor the right slots so it can EXTRACT STRUCTURED INTENT instead of
+ * copying sentences:
+ *   - profile facts  ("I'm a Business Analyst", "I have two kids")
+ *   - goals          ("lose 15 kg", "become a Salesforce Architect")
+ *   - schedule items (tasks / routines / habits) with normalized titles,
+ *     time-of-day bands, frequency counts, and a protected flag.
+ *
+ * A deterministic normalization pass (normalize.ts) canonicalizes whatever any
+ * provider returns, so quality does not depend on a single model's phrasing.
  */
 
 import type { Category, TaskType } from '../domain/types.ts';
 
+export type TimeOfDay = 'early_morning' | 'morning' | 'midday' | 'afternoon' | 'evening' | 'night';
+
+/** "four times a week" -> { unit: 'week', count: 4 }. */
+export interface Frequency {
+  unit: 'day' | 'week' | 'month';
+  count: number;
+}
+
 export interface ExtractedItem {
-  /** Local id for referencing this item within one extraction result. */
   tempId: string;
+  /** Normalized canonical noun phrase ("Gym", "Quran reading", "Jumu'ah") — NOT the raw sentence. */
   title: string;
   type: TaskType;
   category: Category;
-  /** 0..1; below CONFIDENCE_THRESHOLD the item is flagged for review, never silently committed. */
+  /** 0..1; below CONFIDENCE_THRESHOLD the item is flagged for review. */
   confidence: number;
-  startTimeLocal?: string; // "HH:mm"
-  endTimeLocal?: string; // "HH:mm"
+  /** Never schedule over this (prayer, sleep, family dinner, "is important"). */
+  protected?: boolean;
+  startTimeLocal?: string; // explicit clock time only ("HH:mm")
+  endTimeLocal?: string;
+  /** When only a band is implied ("every evening") and no clock time was given. */
+  timeOfDay?: TimeOfDay;
   durationMin?: number;
-  /** RFC 5545 RRULE the model PROPOSES; engine re-validates and is the authority. */
+  /** Count-based cadence ("4 times a week") when specific days/times aren't given. */
+  frequency?: Frequency;
+  /** RFC 5545 RRULE when recurrence is determinable; engine re-validates. */
   rrule?: string;
-  /** Anchor date for the series, if the input implies one. Defaults applied downstream. */
   dtStart?: string; // "YYYY-MM-DD"
   assigneeName?: string;
   priorityHint?: 1 | 2 | 3 | 4 | 5;
   notes?: string;
-  /** Exact input span this item was derived from — powers the trust UI & debugging. */
+  /** Exact input span this was derived from — for the trust UI & debugging. */
+  sourceSpan?: string;
+}
+
+/** A durable fact about the person, not a schedulable thing. */
+export interface ProfileFact {
+  kind: 'role' | 'work' | 'family' | 'health' | 'location' | 'preference' | 'faith' | 'other';
+  value: string; // normalized: "Business Analyst", "Two kids"
+  sourceSpan?: string;
+}
+
+/** An aspiration that should generate a plan, not a single task. */
+export interface Goal {
+  title: string; // "Lose 15 kg", "Become a Salesforce Architect"
+  metric?: string;
+  target?: string;
+  deadline?: string; // "YYYY-MM-DD"
   sourceSpan?: string;
 }
 
@@ -38,7 +75,12 @@ export interface Ambiguity {
 }
 
 export interface ExtractionResult {
+  /** Facts about the person (never turned into tasks). */
+  profile: ProfileFact[];
+  /** Schedulable items. */
   items: ExtractedItem[];
+  /** Aspirations to plan toward. */
+  goals: Goal[];
   ambiguities: Ambiguity[];
   warnings: string[];
 }

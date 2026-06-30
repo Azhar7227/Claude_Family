@@ -14,20 +14,34 @@
 
 import { assertCanHandle, type AIProvider, type InputPart, type StructuredRequest } from './provider.ts';
 import { EXTRACTION_RESULT_SCHEMA, SchemaValidationError, validateExtractionResult } from './schema.ts';
+import { normalizeExtraction } from './normalize.ts';
 import type { ExtractionResult } from './types.ts';
 import { confidenceStats, NoopEvalSink, type EvalSink, type InputMethod } from '../eval/sink.ts';
 
-export const EXTRACTION_PROMPT_VERSION = 'extract-v1';
+export const EXTRACTION_PROMPT_VERSION = 'extract-v2';
 
 const INSTRUCTION = [
-  'You extract schedulable items from a user describing their life.',
-  'Return ONLY JSON matching the provided schema.',
-  'Classify each item as "fixed" (immovable: work, meetings, school, prayer, appointments)',
-  'or "flexible" (movable: study, gym, reading, walking).',
-  'Use RFC 5545 RRULE for recurrence. Never invent times or dates not implied by the input;',
-  'when unsure, add an entry to "ambiguities" instead of guessing.',
-  'Provide a confidence in [0,1] and the source span for each item.',
-].join(' ');
+  'You are a planner that EXTRACTS STRUCTURED INTENT from a person describing their life.',
+  'Do NOT copy sentences. Understand what the person means, then fill the schema.',
+  '',
+  'Route each statement to the right slot:',
+  '- profile: durable facts about the person, NOT tasks. "I\'m a Business Analyst" -> profile {kind:"role", value:"Business Analyst"}. "I have two kids" -> profile {kind:"family", value:"Two kids"}.',
+  '- goals: aspirations that need a plan, not one task. "lose 15 kg" / "become a Salesforce Architect" -> goals.',
+  '- items: schedulable tasks/routines/habits.',
+  '',
+  'For each item:',
+  '- title: a SHORT canonical noun phrase, not the sentence. "Need gym four times" -> title "Gym". "Need Quran reading" -> title "Quran reading". Put the original phrasing in sourceSpan.',
+  '- type: "fixed" = immovable commitments (meetings, school, appointments, prayers, flights); "flexible" = movable (gym, study, reading, family time, walks). "Spend time with my kids" is flexible.',
+  '- protected: true when it must never be scheduled over (prayers, sleep, family dinner, or stated as "important").',
+  '- frequency: counts like "four times a week" -> {unit:"week", count:4} (do NOT put a clock time).',
+  '- timeOfDay: when only a part of day is implied ("every evening") and no clock time is given, set the band (morning/midday/afternoon/evening/night) and leave startTimeLocal empty.',
+  '- startTimeLocal/endTimeLocal: only when an explicit clock time is stated.',
+  '- rrule: RFC 5545 when a concrete recurrence is clear.',
+  '- Domain knowledge: "Friday prayer"/Jumu\'ah is a weekly Friday congregational prayer (fixed, protected, faith). The five daily prayers are fixed/protected/faith. Exact prayer times are location-dependent — do not invent them; add an ambiguity instead.',
+  '',
+  'Never invent times/dates not implied; when unsure, add an "ambiguities" entry. Give a confidence in [0,1] and the sourceSpan for every item.',
+  'Return ONLY JSON matching the schema, with keys profile, items, goals, ambiguities, warnings (use [] when empty).',
+].join('\n');
 
 export interface ExtractInput {
   parts: InputPart[];
@@ -80,7 +94,8 @@ export async function extract(
   const latencyMs = Math.round(monotonic() - startedAt);
 
   try {
-    const result = validateExtractionResult(raw); // boundary: never trust the provider
+    // boundary: never trust the provider, then canonicalize (planner-grade normalization)
+    const result = normalizeExtraction(validateExtractionResult(raw));
     safeRecord(() => {
       const stats = confidenceStats(result.items.map((i) => i.confidence));
       sink.recordExtraction({

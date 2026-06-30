@@ -189,10 +189,22 @@ export function proposalReview(store: AppStore, p: Proposal): HTMLElement {
     else dismiss(store);
   };
 
+  const facts = p.profileFacts ?? [];
+  const goals = p.goals ?? [];
+
   return h('div', { class: 'screen' },
     h('h2', {}, isCapture ? 'Review your plan' : 'A suggestion'),
     !isCapture && p.explanation ? h('div', { class: 'proposal-why' }, h('span', { class: 'si' }, icon('sparkles', 20)), h('div', {}, p.explanation.why)) : null,
-    p.adjustments.length === 0 ? emptyState('All good', 'Everything already fits.') : null,
+    facts.length
+      ? h('div', { class: 'context-card' }, h('div', { class: 'ctx-label' }, icon('sparkles', 14), 'About you'),
+          h('div', { class: 'chips-row' }, ...facts.map((f) => h('span', { class: 'ctx-chip' }, f.value))))
+      : null,
+    goals.length
+      ? h('div', { class: 'context-card' }, h('div', { class: 'ctx-label' }, icon('flag', 14), 'Goals noted'),
+          h('div', { class: 'chips-row' }, ...goals.map((g) => h('span', { class: 'ctx-chip' }, g.title))))
+      : null,
+    p.adjustments.length === 0 && !facts.length && !goals.length ? emptyState('All good', 'Everything already fits.') : null,
+    p.adjustments.length ? h('h3', {}, isCapture ? 'Routine' : 'Changes') : null,
     ...p.adjustments.map(cardFor),
     ...p.conflicts.map((c) => h('div', { class: 'proposal-why' }, h('span', { class: 'si' }, icon('clock', 18)), h('div', { class: 'small' }, c.detail))),
     p.adjustments.length
@@ -368,7 +380,8 @@ function adjTitle(store: AppStore, a: Adjustment): string {
 function adjSub(store: AppStore, a: Adjustment): string {
   if (a.op === 'add' && a.after) {
     const time = a.after.startTimeLocal ? a.after.startTimeLocal : 'anytime';
-    return `${time} · ${humanRRule(a.after.rrule ?? '')} · ${a.after.type}`;
+    const prot = a.after.protected ? ' · protected' : '';
+    return `${time} · ${humanRRule(a.after.rrule ?? '')} · ${a.after.type}${prot}`;
   }
   if (a.occurrenceChange) {
     const oc = a.occurrenceChange;

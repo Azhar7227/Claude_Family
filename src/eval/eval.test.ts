@@ -46,7 +46,7 @@ test('records an extraction trace with provider/model/prompt/latency/confidence'
   assert.equal(trace.traceId, 'tr1');
   assert.equal(trace.provider, 'stub');
   assert.equal(trace.model, 'deterministic-stub-v1');
-  assert.equal(trace.promptVersion, 'extract-v1');
+  assert.equal(trace.promptVersion, 'extract-v2');
   assert.equal(trace.latencyMs, 5);
   assert.equal(trace.validation.ok, true);
   assert.equal(trace.inputMethod, 'text');

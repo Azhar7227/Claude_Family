@@ -32,6 +32,8 @@ import { utcToLocalDate } from '../engine/time.ts';
 import { DurableStore, type KVStore } from './storage.ts';
 import { apiExtract, apiHealth } from './api.ts';
 import { validateExtractionResult } from '../ai/schema.ts';
+import { normalizeExtraction } from '../ai/normalize.ts';
+import type { Goal, ProfileFact } from '../ai/types.ts';
 
 export interface Settings {
   timezone: string;
@@ -100,6 +102,8 @@ export class AppStore {
   recovery: { recovered: boolean; source: string } = { recovered: false, source: 'primary' };
   aiStatus: AiStatus = { online: false, provider: 'stub' };
   notifier?: NotifierLike;
+  profileFacts: ProfileFact[] = [];
+  goals: Goal[] = [];
   private listeners = new Set<() => void>();
   private durable: DurableStore;
 
@@ -158,7 +162,7 @@ export class AppStore {
       const extraction: ExtractionResult = await timed('Extract + Validate', async () => {
         if (useProxy) {
           const { result } = await apiExtract(doc.parts);
-          return validateExtractionResult(result); // re-validate client-side; never trust the wire
+          return normalizeExtraction(validateExtractionResult(result)); // re-validate + canonicalize; never trust the wire
         }
         const provider = this.providerFor(input.method);
         const out = await extract(provider, { parts: doc.parts }, { sink: this.evalSink, traceId, inputMethod: doc.method, now: () => this.nowIso() });
@@ -190,6 +194,8 @@ export class AppStore {
   acceptPending(refs?: string[], edited = false): void {
     if (!this.pendingProposal) return;
     const accepted = acceptProposal(this.pendingProposal, refs);
+    // profile facts & goals are acknowledged context, never tasks — capture them on accept.
+    this.mergeProfile(this.pendingProposal.profileFacts, this.pendingProposal.goals);
     const source: CaptureSource = { method: methodOf(this.lastTrace), capturedAt: this.nowIso() };
     const result = commit(accepted, this.repo, { source, idGen: uuid, now: () => this.nowIso(), materializeDays: 35 });
     recordProposalOutcome(this.evalSink, accepted, { now: () => this.nowIso(), edited });
@@ -330,6 +336,8 @@ export class AppStore {
     this.repo = new InMemoryRepository();
     this.pendingProposal = null;
     this.onboarded = false;
+    this.profileFacts = [];
+    this.goals = [];
     this.emit();
   }
 
@@ -362,6 +370,16 @@ export class AppStore {
     return { lastSavedAt: this.durable.lastSavedAt(), snapshots: this.durable.snapshotInfo().length };
   }
 
+  private mergeProfile(facts?: ProfileFact[], goals?: Goal[]): void {
+    for (const f of facts ?? []) {
+      const k = `${f.kind}|${f.value.toLowerCase()}`;
+      if (!this.profileFacts.some((p) => `${p.kind}|${p.value.toLowerCase()}` === k)) this.profileFacts.push(f);
+    }
+    for (const g of goals ?? []) {
+      if (!this.goals.some((x) => x.title.toLowerCase() === g.title.toLowerCase())) this.goals.push(g);
+    }
+  }
+
   // ---- Persistence (durable: primary + backup + snapshots) ----
   private serialize(): LifeflowData {
     return {
@@ -371,6 +389,8 @@ export class AppStore {
       recurrences: [...this.repo.recurrences.values()],
       occurrences: this.repo.occurrences,
       ledger: this.repo.ledger,
+      profileFacts: this.profileFacts,
+      goals: this.goals,
     };
   }
   private save(): void {
@@ -383,6 +403,8 @@ export class AppStore {
     if (!data) return;
     this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
     this.onboarded = Boolean(data.onboarded);
+    this.profileFacts = data.profileFacts ?? [];
+    this.goals = data.goals ?? [];
     const repo = new InMemoryRepository();
     for (const t of data.tasks ?? []) repo.addTask(t);
     for (const r of data.recurrences ?? []) repo.addRecurrence(r);
@@ -399,6 +421,8 @@ interface LifeflowData {
   recurrences: RecurrenceRule[];
   occurrences: Occurrence[];
   ledger: LedgerEntry[];
+  profileFacts?: ProfileFact[];
+  goals?: Goal[];
 }
 
 function isLifeflowData(d: unknown): boolean {

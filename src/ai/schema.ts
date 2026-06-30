@@ -12,7 +12,9 @@
 import type { Category, TaskType } from '../domain/types.ts';
 import { isValidRRule } from '../engine/recurrence.ts';
 import type { JsonSchema } from './provider.ts';
-import type { ExtractedItem, ExtractionResult, Ambiguity } from './types.ts';
+import type { ExtractedItem, ExtractionResult, Ambiguity, Goal, ProfileFact } from './types.ts';
+
+const PROFILE_KINDS: ReadonlySet<string> = new Set(['role', 'work', 'family', 'health', 'location', 'preference', 'faith', 'other']);
 
 const CATEGORIES: ReadonlySet<Category> = new Set<Category>([
   'work',
@@ -38,12 +40,27 @@ export class SchemaValidationError extends Error {
   }
 }
 
-/** The JSON Schema providers are asked to honor. Exported so adapters send the contract. */
+const TIME_OF_DAY = ['early_morning', 'morning', 'midday', 'afternoon', 'evening', 'night'] as const;
+
+/** The JSON Schema providers are asked to honor (ontology v2). */
 export const EXTRACTION_RESULT_SCHEMA: JsonSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['items', 'ambiguities', 'warnings'],
+  required: ['profile', 'items', 'goals', 'ambiguities', 'warnings'],
   properties: {
+    profile: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'value'],
+        properties: {
+          kind: { enum: ['role', 'work', 'family', 'health', 'location', 'preference', 'faith', 'other'] },
+          value: { type: 'string' },
+          sourceSpan: { type: 'string' },
+        },
+      },
+    },
     items: {
       type: 'array',
       items: {
@@ -56,14 +73,37 @@ export const EXTRACTION_RESULT_SCHEMA: JsonSchema = {
           type: { enum: ['fixed', 'flexible'] },
           category: { enum: [...CATEGORIES] },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
+          protected: { type: 'boolean' },
           startTimeLocal: { type: 'string' },
           endTimeLocal: { type: 'string' },
+          timeOfDay: { enum: [...TIME_OF_DAY] },
           durationMin: { type: 'number' },
+          frequency: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['unit', 'count'],
+            properties: { unit: { enum: ['day', 'week', 'month'] }, count: { type: 'integer', minimum: 1 } },
+          },
           rrule: { type: 'string' },
           dtStart: { type: 'string' },
           assigneeName: { type: 'string' },
           priorityHint: { type: 'integer', minimum: 1, maximum: 5 },
           notes: { type: 'string' },
+          sourceSpan: { type: 'string' },
+        },
+      },
+    },
+    goals: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title'],
+        properties: {
+          title: { type: 'string' },
+          metric: { type: 'string' },
+          target: { type: 'string' },
+          deadline: { type: 'string' },
           sourceSpan: { type: 'string' },
         },
       },
@@ -144,6 +184,14 @@ export function validateExtractionResult(raw: unknown): ExtractionResult {
       if (HHMM.test(rawItem.endTimeLocal)) item.endTimeLocal = rawItem.endTimeLocal;
       else warnings.push(`${where}.endTimeLocal "${rawItem.endTimeLocal}" ignored (not HH:mm)`);
     }
+    if (rawItem.protected === true) item.protected = true;
+    if (typeof rawItem.timeOfDay === 'string' && (TIME_OF_DAY as readonly string[]).includes(rawItem.timeOfDay)) {
+      item.timeOfDay = rawItem.timeOfDay as ExtractedItem['timeOfDay'];
+    }
+    if (isObject(rawItem.frequency) && typeof rawItem.frequency.count === 'number' && rawItem.frequency.count >= 1
+        && ['day', 'week', 'month'].includes(String(rawItem.frequency.unit))) {
+      item.frequency = { unit: rawItem.frequency.unit as 'day' | 'week' | 'month', count: Math.round(rawItem.frequency.count) };
+    }
     if (typeof rawItem.durationMin === 'number' && rawItem.durationMin > 0) item.durationMin = rawItem.durationMin;
     if (typeof rawItem.dtStart === 'string') {
       if (YMD.test(rawItem.dtStart)) item.dtStart = rawItem.dtStart;
@@ -177,7 +225,29 @@ export function validateExtractionResult(raw: unknown): ExtractionResult {
       })
     : [];
 
-  return { items, ambiguities, warnings };
+  // profile + goals are optional (default []), so v1-shaped fixtures still validate.
+  const profile: ProfileFact[] = Array.isArray(raw.profile)
+    ? (raw.profile as unknown[]).flatMap((p) => {
+        if (!isObject(p) || typeof p.value !== 'string' || !PROFILE_KINDS.has(String(p.kind))) return [];
+        const fact: ProfileFact = { kind: p.kind as ProfileFact['kind'], value: p.value };
+        if (typeof p.sourceSpan === 'string') fact.sourceSpan = p.sourceSpan;
+        return [fact];
+      })
+    : [];
+
+  const goals: Goal[] = Array.isArray(raw.goals)
+    ? (raw.goals as unknown[]).flatMap((g) => {
+        if (!isObject(g) || typeof g.title !== 'string' || !g.title.trim()) return [];
+        const goal: Goal = { title: g.title.trim() };
+        if (typeof g.metric === 'string') goal.metric = g.metric;
+        if (typeof g.target === 'string') goal.target = g.target;
+        if (typeof g.deadline === 'string') goal.deadline = g.deadline;
+        if (typeof g.sourceSpan === 'string') goal.sourceSpan = g.sourceSpan;
+        return [goal];
+      })
+    : [];
+
+  return { profile, items, goals, ambiguities, warnings };
 }
 
 function clamp01(n: number): number {

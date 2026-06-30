@@ -7,7 +7,7 @@
  */
 
 import type { Category, IANATz, ISODate, TaskType, UUID } from '../domain/types.ts';
-import type { Ambiguity, ExtractionResult } from '../ai/types.ts';
+import type { Ambiguity, ExtractionResult, Goal, ProfileFact } from '../ai/types.ts';
 import { CONFIDENCE_THRESHOLD } from '../ai/types.ts';
 import { reconcile, type DiffableTask } from '../engine/dedup.ts';
 import { detectConflicts, type Conflict, type PlacedItem } from '../engine/conflicts.ts';
@@ -40,6 +40,8 @@ export interface CandidateTask {
   startTimeLocal?: string;
   endTimeLocal?: string;
   timezone: IANATz;
+  /** Never schedule over this (prayer, sleep, family dinner). */
+  protected?: boolean;
 }
 
 /** Occurrence-level timing change carried by move/shorten/skip adjustments. */
@@ -85,6 +87,10 @@ export interface Proposal {
   traceId?: string;
   /** Proposal-level explanation (rolls up the per-adjustment explanations). */
   explanation?: Explanation;
+  /** Profile facts extracted from the same capture (acknowledged, NOT scheduled). */
+  profileFacts?: ProfileFact[];
+  /** Goals extracted from the same capture (planned later, NOT scheduled as tasks). */
+  goals?: Goal[];
 }
 
 export interface BuildContext {
@@ -124,6 +130,7 @@ function toCandidates(
       startTimeLocal: item.startTimeLocal,
       endTimeLocal: item.endTimeLocal,
       timezone: ctx.timezone,
+      protected: item.protected,
     },
   }));
 }
@@ -210,6 +217,8 @@ export function buildProposal(extraction: ExtractionResult, ctx: BuildContext): 
     status: 'proposed',
     createdAt: ctx.now(),
     traceId: ctx.traceId,
+    profileFacts: extraction.profile,
+    goals: extraction.goals,
   };
 }
 
