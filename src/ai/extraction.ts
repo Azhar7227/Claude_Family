@@ -27,6 +27,7 @@ const INSTRUCTION = [
   'Route each statement to the right slot:',
   '- profile: durable facts about the person, NOT tasks. "I\'m a Business Analyst" -> profile {kind:"role", value:"Business Analyst"}. "I have two kids" -> profile {kind:"family", value:"Two kids"}.',
   '- goals: aspirations that need a plan, not one task. "lose 15 kg" / "become a Salesforce Architect" -> goals.',
+  '- constraints: scheduling BOUNDARIES that are not tasks. "No meetings before 10" -> {kind:"before", timeLocal:"10:00"}. "Keep Sundays free" -> {kind:"day_off", weekdays:["SU"]}. "Don\'t schedule over Maghrib" / "avoid the kids\' nap" -> {kind:"between", startLocal, endLocal}. "No work after 8pm" -> {kind:"after", timeLocal:"20:00"}.',
   '- items: schedulable tasks/routines/habits.',
   '',
   'For each item:',
@@ -40,7 +41,7 @@ const INSTRUCTION = [
   '- Domain knowledge: "Friday prayer"/Jumu\'ah is a weekly Friday congregational prayer (fixed, protected, faith). The five daily prayers are fixed/protected/faith. Exact prayer times are location-dependent — do not invent them; add an ambiguity instead.',
   '',
   'Never invent times/dates not implied; when unsure, add an "ambiguities" entry. Give a confidence in [0,1] and the sourceSpan for every item.',
-  'Return ONLY JSON matching the schema, with keys profile, items, goals, ambiguities, warnings (use [] when empty).',
+  'Return ONLY JSON matching the schema, with keys profile, items, goals, constraints, ambiguities, warnings (use [] when empty).',
 ].join('\n');
 
 export interface ExtractInput {

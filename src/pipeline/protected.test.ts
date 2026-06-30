@@ -16,7 +16,7 @@ const SOURCE: CaptureSource = { method: 'text', capturedAt: NOW };
 
 function extraction(items: Array<Partial<ExtractionResult['items'][number]>>): ExtractionResult {
   return {
-    profile: [], goals: [], ambiguities: [], warnings: [],
+    profile: [], goals: [], constraints: [], ambiguities: [], warnings: [],
     items: items.map((p, i) => ({ tempId: `t${i}`, title: p.title ?? 'X', type: p.type ?? 'flexible', category: p.category ?? 'other', confidence: 0.9, ...p })),
   };
 }

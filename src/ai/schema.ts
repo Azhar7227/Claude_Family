@@ -12,9 +12,11 @@
 import type { Category, TaskType } from '../domain/types.ts';
 import { isValidRRule } from '../engine/recurrence.ts';
 import type { JsonSchema } from './provider.ts';
-import type { ExtractedItem, ExtractionResult, Ambiguity, Goal, ProfileFact } from './types.ts';
+import type { ExtractedItem, ExtractionResult, Ambiguity, Goal, ProfileFact, ExtractedConstraint } from './types.ts';
 
 const PROFILE_KINDS: ReadonlySet<string> = new Set(['role', 'work', 'family', 'health', 'location', 'preference', 'faith', 'other']);
+const CONSTRAINT_KINDS: ReadonlySet<string> = new Set(['before', 'after', 'between', 'day_off']);
+const WEEKDAYS: ReadonlySet<string> = new Set(['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']);
 
 const CATEGORIES: ReadonlySet<Category> = new Set<Category>([
   'work',
@@ -46,7 +48,7 @@ const TIME_OF_DAY = ['early_morning', 'morning', 'midday', 'afternoon', 'evening
 export const EXTRACTION_RESULT_SCHEMA: JsonSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['profile', 'items', 'goals', 'ambiguities', 'warnings'],
+  required: ['profile', 'items', 'goals', 'constraints', 'ambiguities', 'warnings'],
   properties: {
     profile: {
       type: 'array',
@@ -104,6 +106,24 @@ export const EXTRACTION_RESULT_SCHEMA: JsonSchema = {
           metric: { type: 'string' },
           target: { type: 'string' },
           deadline: { type: 'string' },
+          sourceSpan: { type: 'string' },
+        },
+      },
+    },
+    constraints: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['label', 'kind'],
+        properties: {
+          label: { type: 'string' },
+          kind: { enum: ['before', 'after', 'between', 'day_off'] },
+          timeLocal: { type: 'string' },
+          startLocal: { type: 'string' },
+          endLocal: { type: 'string' },
+          weekdays: { type: 'array', items: { enum: ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] } },
+          category: { enum: [...CATEGORIES] },
           sourceSpan: { type: 'string' },
         },
       },
@@ -247,7 +267,21 @@ export function validateExtractionResult(raw: unknown): ExtractionResult {
       })
     : [];
 
-  return { profile, items, goals, ambiguities, warnings };
+  const constraints: ExtractedConstraint[] = Array.isArray(raw.constraints)
+    ? (raw.constraints as unknown[]).flatMap((c) => {
+        if (!isObject(c) || typeof c.label !== 'string' || !CONSTRAINT_KINDS.has(String(c.kind))) return [];
+        const con: ExtractedConstraint = { label: c.label, kind: c.kind as ExtractedConstraint['kind'] };
+        if (typeof c.timeLocal === 'string' && HHMM.test(c.timeLocal)) con.timeLocal = c.timeLocal;
+        if (typeof c.startLocal === 'string' && HHMM.test(c.startLocal)) con.startLocal = c.startLocal;
+        if (typeof c.endLocal === 'string' && HHMM.test(c.endLocal)) con.endLocal = c.endLocal;
+        if (Array.isArray(c.weekdays)) con.weekdays = c.weekdays.filter((w): w is string => typeof w === 'string' && WEEKDAYS.has(w));
+        if (typeof c.category === 'string' && CATEGORIES.has(c.category as Category)) con.category = c.category as Category;
+        if (typeof c.sourceSpan === 'string') con.sourceSpan = c.sourceSpan;
+        return [con];
+      })
+    : [];
+
+  return { profile, items, goals, constraints, ambiguities, warnings };
 }
 
 function clamp01(n: number): number {

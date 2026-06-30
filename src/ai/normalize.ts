@@ -17,7 +17,7 @@
 
 import type { Category, TaskType } from '../domain/types.ts';
 import { isValidRRule } from '../engine/recurrence.ts';
-import type { ExtractedItem, ExtractionResult, Frequency, Goal, ProfileFact, TimeOfDay } from './types.ts';
+import type { ExtractedConstraint, ExtractedItem, ExtractionResult, Frequency, Goal, ProfileFact, TimeOfDay } from './types.ts';
 
 const NUM_WORDS: Record<string, number> = {
   once: 1, one: 1, twice: 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
@@ -121,6 +121,86 @@ function detectTimeOfDay(span: string): TimeOfDay | undefined {
   return undefined;
 }
 
+// ---------- constraint detection ----------
+const WEEKDAY_MAP: Record<string, string> = { sun: 'SU', mon: 'MO', tue: 'TU', wed: 'WE', thu: 'TH', fri: 'FR', sat: 'SA' };
+// Named windows whose exact time is location/preference-dependent: default + flag.
+const NAMED_WINDOWS: Array<[RegExp, string, string]> = [
+  [/\bfajr\b/i, '05:30', '06:00'],
+  [/\b(dhuhr|zuhr)\b/i, '12:30', '13:00'],
+  [/\basr\b/i, '15:00', '15:30'],
+  [/\bmaghrib\b/i, '18:30', '19:30'],
+  [/\bisha\b/i, '21:00', '21:30'],
+  [/\bnap\b/i, '13:00', '15:00'],
+  [/\b(lunch)\b/i, '12:30', '13:30'],
+];
+
+function parseClock(token: string): string | undefined {
+  const t = token.trim().toLowerCase();
+  if (/^noon|midday$/.test(t)) return '12:00';
+  if (t === 'midnight') return '00:00';
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/.exec(t);
+  if (!m) return undefined;
+  let h = Number(m[1]);
+  const min = m[2] ? Number(m[2]) : 0;
+  if (h > 23 || min > 59) return undefined;
+  if (m[3] === 'pm' && h < 12) h += 12;
+  if (m[3] === 'am' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+function categoryScope(span: string): Category | undefined {
+  return /\b(meeting|meetings|call|calls|standup)\b/i.test(span) ? 'work' : undefined;
+}
+
+/** Detect a declarative boundary from a phrase. Returns null if it isn't one. */
+function detectConstraint(span: string): ExtractedConstraint | null {
+  const s = span.trim();
+
+  // before / after a clock time
+  let m = /\bno\s+[\w\s]*?\b(before|after)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?|noon|midnight|midday)\b/i.exec(s)
+    ?? /\b(?:nothing|don'?t\s+schedule\w*|no\s+early\s+starts?)\s+(before|after)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?|noon|midnight)\b/i.exec(s);
+  if (m) {
+    const time = parseClock(m[2]!);
+    if (time) return { label: titleish(s), kind: m[1]!.toLowerCase() as 'before' | 'after', timeLocal: time, category: categoryScope(s), sourceSpan: s };
+  }
+
+  // keep <day(s)> free / off  |  no <x> on <day>
+  m = /\b(?:keep\s+)?(sundays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|weekends?|weekdays?)\s+(?:free|off|clear|open|for\s+\w+)\b/i.exec(s)
+    ?? /\bno\s+(?:work|meetings?|chores?|calls?)\s+on\s+(sundays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|weekends?)\b/i.exec(s);
+  if (m) {
+    const days = weekdaysFor(m[1]!.toLowerCase());
+    if (days.length) return { label: titleish(s), kind: 'day_off', weekdays: days, sourceSpan: s };
+  }
+
+  // between / from T to T
+  m = /\b(?:between|from)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?|noon)\s+(?:and|to|-|–|until)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?|noon)\b/i.exec(s);
+  if (m && /\b(no|don'?t|do not|avoid|never|block|keep|free|busy)\b/i.test(s)) {
+    const start = parseClock(m[1]!);
+    const end = parseClock(m[2]!);
+    if (start && end) return { label: titleish(s), kind: 'between', startLocal: start, endLocal: end, sourceSpan: s };
+  }
+
+  // don't schedule over/during <named window>
+  if (/\b(don'?t|do not|avoid|never)\s+(schedul\w*|book\w*|put\s+anything)\b/i.test(s) || /\b(no\s+meetings?|keep\s+clear|block)\b/i.test(s)) {
+    for (const [re, start, end] of NAMED_WINDOWS) {
+      if (re.test(s)) return { label: titleish(s), kind: 'between', startLocal: start, endLocal: end, sourceSpan: s };
+    }
+  }
+  return null;
+}
+
+function weekdaysFor(word: string): string[] {
+  if (/weekend/.test(word)) return ['SA', 'SU'];
+  if (/weekday/.test(word)) return ['MO', 'TU', 'WE', 'TH', 'FR'];
+  const key = word.slice(0, 3);
+  return WEEKDAY_MAP[key] ? [WEEKDAY_MAP[key]] : [];
+}
+
+function titleish(s: string): string {
+  const t = s.replace(/[.,;!]+$/, '').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 function parseFrequency(span: string): Frequency | undefined {
   const m = /\b(\d+|once|twice|one|two|three|four|five|six|seven)\s+times?(?:\s+(?:a|per)\s+(day|week|month))?\b/i.exec(span)
     ?? /\b(once|twice)(?:\s+(?:a|per)\s+(day|week|month))?\b/i.exec(span);
@@ -173,6 +253,7 @@ export function normalizeExtraction(result: ExtractionResult, opts: NormalizeOpt
   const bands = opts.timeOfDayDefaults ?? TIME_OF_DAY_DEFAULT;
   const profile: ProfileFact[] = [...(result.profile ?? [])];
   const goals: Goal[] = [...(result.goals ?? [])];
+  const constraints: ExtractedConstraint[] = [...(result.constraints ?? [])];
   const ambiguities = [...(result.ambiguities ?? [])];
   const warnings = [...(result.warnings ?? [])];
   const items: ExtractedItem[] = [];
@@ -180,10 +261,15 @@ export function normalizeExtraction(result: ExtractionResult, opts: NormalizeOpt
   for (const original of result.items ?? []) {
     const span = original.sourceSpan ?? original.title;
 
-    // 1. profile / goal rescue — never let these become tasks
+    // 1. profile / goal / constraint rescue — never let these become tasks
     const fact = detectProfile(span);
     if (fact) {
       profile.push(fact);
+      continue;
+    }
+    const constraint = detectConstraint(span);
+    if (constraint) {
+      constraints.push(constraint);
       continue;
     }
     if (looksLikeGoal(span) && !LEXICON.some((e) => e.re.test(span))) {
@@ -238,7 +324,7 @@ export function normalizeExtraction(result: ExtractionResult, opts: NormalizeOpt
     items.push(item);
   }
 
-  return { profile: dedupeProfile(profile), items, goals, ambiguities, warnings };
+  return { profile: dedupeProfile(profile), items, goals, constraints, ambiguities, warnings };
 }
 
 function hasExplicitTime(item: ExtractedItem): boolean {

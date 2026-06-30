@@ -85,3 +85,28 @@ export interface ProtectedTime {
   endTimeLocal: LocalTime;
   timezone: IANATz;
 }
+
+export type ConstraintKind = 'before' | 'after' | 'between' | 'day_off';
+
+/**
+ * A declarative scheduling boundary that is NOT a task: "no meetings before 10",
+ * "keep Sundays free", "don't schedule over Maghrib", "avoid the kids' nap".
+ * Expanded into forbidden intervals the planner must keep clear.
+ */
+export interface Constraint {
+  id: UUID;
+  spaceId: UUID;
+  label: string;
+  kind: ConstraintKind;
+  /** `before`/`after`: the boundary clock time. */
+  timeLocal?: LocalTime;
+  /** `between`: the forbidden window. */
+  startLocal?: LocalTime;
+  endLocal?: LocalTime;
+  /** `day_off`: which days are off; or scoping for before/after/between (default = every day). */
+  weekdays?: string[]; // RFC 5545 day codes: SU MO TU WE TH FR SA
+  /** Optional scope ("no meetings" → only work items). Undefined = all. */
+  category?: Category;
+  source: 'chat' | 'manual';
+  sourceSpan?: string;
+}

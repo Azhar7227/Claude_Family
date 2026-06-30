@@ -14,7 +14,7 @@
  * provider returns, so quality does not depend on a single model's phrasing.
  */
 
-import type { Category, TaskType } from '../domain/types.ts';
+import type { Category, ConstraintKind, TaskType } from '../domain/types.ts';
 
 export type TimeOfDay = 'early_morning' | 'morning' | 'midday' | 'afternoon' | 'evening' | 'night';
 
@@ -67,6 +67,18 @@ export interface Goal {
   sourceSpan?: string;
 }
 
+/** A declarative scheduling boundary extracted from the user (pre-persistence). */
+export interface ExtractedConstraint {
+  label: string;
+  kind: ConstraintKind;
+  timeLocal?: string; // before/after ("HH:mm")
+  startLocal?: string; // between
+  endLocal?: string;
+  weekdays?: string[]; // SU MO TU WE TH FR SA
+  category?: Category;
+  sourceSpan?: string;
+}
+
 export interface Ambiguity {
   tempId: string;
   field: string;
@@ -81,6 +93,8 @@ export interface ExtractionResult {
   items: ExtractedItem[];
   /** Aspirations to plan toward. */
   goals: Goal[];
+  /** Declarative scheduling boundaries. */
+  constraints: ExtractedConstraint[];
   ambiguities: Ambiguity[];
   warnings: string[];
 }

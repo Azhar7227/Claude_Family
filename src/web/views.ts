@@ -191,6 +191,7 @@ export function proposalReview(store: AppStore, p: Proposal): HTMLElement {
 
   const facts = p.profileFacts ?? [];
   const goals = p.goals ?? [];
+  const constraints = p.constraints ?? [];
 
   return h('div', { class: 'screen' },
     h('h2', {}, isCapture ? 'Review your plan' : 'A suggestion'),
@@ -199,11 +200,15 @@ export function proposalReview(store: AppStore, p: Proposal): HTMLElement {
       ? h('div', { class: 'context-card' }, h('div', { class: 'ctx-label' }, icon('sparkles', 14), 'About you'),
           h('div', { class: 'chips-row' }, ...facts.map((f) => h('span', { class: 'ctx-chip' }, f.value))))
       : null,
+    constraints.length
+      ? h('div', { class: 'context-card' }, h('div', { class: 'ctx-label' }, icon('moon', 14), 'Boundaries I’ll respect'),
+          h('div', { class: 'chips-row' }, ...constraints.map((c) => h('span', { class: 'ctx-chip' }, constraintLabel(c)))))
+      : null,
     goals.length
       ? h('div', { class: 'context-card' }, h('div', { class: 'ctx-label' }, icon('flag', 14), 'Goals noted'),
           h('div', { class: 'chips-row' }, ...goals.map((g) => h('span', { class: 'ctx-chip' }, g.title))))
       : null,
-    p.adjustments.length === 0 && !facts.length && !goals.length ? emptyState('All good', 'Everything already fits.') : null,
+    p.adjustments.length === 0 && !facts.length && !goals.length && !constraints.length ? emptyState('All good', 'Everything already fits.') : null,
     p.adjustments.length ? h('h3', {}, isCapture ? 'Routine' : 'Changes') : null,
     ...p.adjustments.map(cardFor),
     ...p.conflicts.map((c) => h('div', { class: 'proposal-why' }, h('span', { class: 'si' }, icon('clock', 18)), h('div', { class: 'small' }, c.detail))),
@@ -288,6 +293,8 @@ export function settings(store: AppStore): HTMLElement {
       listRowControl('clock', 'Batch window', stepper(store, 'batchWindowMin', s.batchWindowMin, 0, 120, 5, 'm')),
     ),
 
+    ...boundariesSection(store),
+
     h('h3', {}, 'Backup & data'),
     h('div', { class: 'group' },
       h('div', { class: 'list-row' }, h('span', { class: 'lead' }, icon('check', 18)), h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, 'Auto-saved'), h('div', { class: 'lsub' }, `last save ${lastSaved} · ${backup.snapshots} restore points`))),
@@ -297,6 +304,20 @@ export function settings(store: AppStore): HTMLElement {
     ),
     h('p', { class: 'small muted', style: 'text-align:center' }, 'Tip: export a backup weekly so you never fear losing your routine.'),
   );
+}
+
+function boundariesSection(store: AppStore): HTMLElement[] {
+  const list = store.constraintList();
+  if (!list.length) return [];
+  return [
+    h('h3', {}, 'Boundaries'),
+    h('div', { class: 'group' }, ...list.map((c) =>
+      h('div', { class: 'list-row' },
+        h('span', { class: 'lead' }, icon('moon', 18)),
+        h('div', { class: 'lmain' }, h('div', { class: 'ltitle' }, constraintLabel(c))),
+        h('button', { class: 'row-act danger', onclick: () => store.deleteConstraint(c.id) }, icon('trash', 18)),
+      ))),
+  ];
 }
 
 function downloadBackup(store: AppStore): void {
@@ -416,6 +437,18 @@ function stepperTime(store: AppStore, val: string): HTMLElement {
 function kpi(value: string, label: string): HTMLElement { return h('div', { class: 'k' }, h('div', { class: 'kv' }, value), h('div', { class: 'kl' }, label)); }
 function emptyState(title: string, sub: string): HTMLElement { return h('div', { class: 'empty-state' }, h('span', { class: 'glyph' }, icon('leaf', 32)), h('div', { style: 'font-weight:600;color:var(--text-2)' }, title), h('p', { class: 'small' }, sub)); }
 function safeJson(v: unknown): string { try { return JSON.stringify(v, null, 2); } catch { return String(v); } }
+
+interface ConstraintLike { label?: string; kind: string; timeLocal?: string; startLocal?: string; endLocal?: string; weekdays?: string[] }
+const DAY_NAME: Record<string, string> = { SU: 'Sun', MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat' };
+function constraintLabel(c: ConstraintLike): string {
+  switch (c.kind) {
+    case 'before': return `No scheduling before ${c.timeLocal}`;
+    case 'after': return `Nothing after ${c.timeLocal}`;
+    case 'between': return `Keep ${c.startLocal}–${c.endLocal} clear`;
+    case 'day_off': return `${(c.weekdays ?? []).map((d) => DAY_NAME[d] ?? d).join(', ')} free`;
+    default: return c.label ?? 'Boundary';
+  }
+}
 
 function greeting(): string { const hr = new Date().getHours(); return hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'; }
 function friendlyToday(): string { return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }); }

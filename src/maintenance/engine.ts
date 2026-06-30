@@ -54,11 +54,13 @@ export interface MaintenanceContext {
   idGen: () => string;
   nowFn: () => string;
   minDurationMin?: number;
+  /** Forbidden intervals from the user's constraints (already expanded to UTC). */
+  constraintBlocks?: Array<{ label: string; start: ISO; end: ISO }>;
 }
 
 interface LabeledBlock extends Interval {
   label: string;
-  kind: 'fixed' | 'protected';
+  kind: 'fixed' | 'protected' | 'constraint';
 }
 
 const REASON_BY_TRIGGER: Record<MaintenanceTrigger['kind'], ProposalReason> = {
@@ -107,6 +109,11 @@ export function buildMaintenanceProposal(
   if (trigger.kind === 'calendar_conflict') {
     const f = trigger.addedFixed;
     const b: LabeledBlock = { start: Date.parse(f.start), end: Date.parse(f.end), label: f.title, kind: 'fixed' };
+    if (overlaps(b, window)) blocks.push(b);
+  }
+  // declarative constraints become frozen 'constraint' blocks (never scheduled into)
+  for (const cb of ctx.constraintBlocks ?? []) {
+    const b: LabeledBlock = { start: Date.parse(cb.start), end: Date.parse(cb.end), label: cb.label, kind: 'constraint' };
     if (overlaps(b, window)) blocks.push(b);
   }
 

@@ -11,7 +11,8 @@ export type ConflictKind =
   | 'overlap' // two flexible (or two fixed) items occupy the same time
   | 'fixed_collision' // a flexible item overlaps a fixed one (fixed wins)
   | 'over_capacity' // impossible scheduled density in a day
-  | 'protected_time'; // overlaps a user-declared protected block
+  | 'protected_time' // overlaps a user-declared protected block
+  | 'constraint'; // violates a declarative boundary (e.g. "no meetings before 10")
 
 export interface PlacedItem {
   id: UUID; // occurrence id
@@ -49,6 +50,8 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): b
 
 export interface DetectOptions {
   protectedBlocks?: ProtectedBlock[];
+  /** Declarative boundaries (constraints) expanded to intervals; overlap -> kind 'constraint'. */
+  constraintBlocks?: ProtectedBlock[];
   dayCapacityMin?: number;
 }
 
@@ -110,6 +113,22 @@ export function detectConflicts(items: PlacedItem[], opts: DetectOptions = {}): 
           kind: 'protected_time',
           itemRefs: [item.id],
           detail: `"${item.title}" overlaps protected time "${block.label}".`,
+          moveCandidateId: item.type === 'fixed' ? null : item.id,
+        });
+      }
+    }
+  }
+
+  // declarative constraints (boundaries)
+  for (const block of opts.constraintBlocks ?? []) {
+    const cStart = ms(block.start);
+    const cEnd = ms(block.end);
+    for (const item of sorted) {
+      if (overlaps(ms(item.start), ms(item.end), cStart, cEnd)) {
+        conflicts.push({
+          kind: 'constraint',
+          itemRefs: [item.id],
+          detail: `"${item.title}" violates "${block.label}".`,
           moveCandidateId: item.type === 'fixed' ? null : item.id,
         });
       }

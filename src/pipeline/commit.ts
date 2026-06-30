@@ -9,6 +9,7 @@
 
 import type {
   CaptureSource,
+  Constraint,
   IANATz,
   ISODate,
   Occurrence,
@@ -52,6 +53,9 @@ export interface Repository {
   getOccurrence(id: UUID): Occurrence | undefined;
   updateOccurrence(id: UUID, patch: Partial<Occurrence>): void;
   appendLedger(entry: LedgerEntry): void;
+  addConstraint(c: Constraint): void;
+  removeConstraint(id: UUID): void;
+  listConstraints(): Constraint[];
 }
 
 export interface CommitContext {
@@ -238,6 +242,7 @@ export class InMemoryRepository implements Repository {
   readonly recurrences = new Map<UUID, RecurrenceRule>(); // keyed by taskId
   readonly occurrences: Occurrence[] = [];
   readonly ledger: LedgerEntry[] = [];
+  readonly constraints: Constraint[] = [];
 
   addTask(task: Task): void {
     this.tasks.set(task.id, task);
@@ -275,5 +280,15 @@ export class InMemoryRepository implements Repository {
   }
   appendLedger(entry: LedgerEntry): void {
     this.ledger.push(entry);
+  }
+  addConstraint(c: Constraint): void {
+    this.constraints.push(c);
+  }
+  removeConstraint(id: UUID): void {
+    const i = this.constraints.findIndex((c) => c.id === id);
+    if (i >= 0) this.constraints.splice(i, 1);
+  }
+  listConstraints(): Constraint[] {
+    return this.constraints;
   }
 }

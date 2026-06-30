@@ -7,7 +7,8 @@
  */
 
 import type { Category, IANATz, ISODate, TaskType, UUID } from '../domain/types.ts';
-import type { Ambiguity, ExtractionResult, Goal, ProfileFact } from '../ai/types.ts';
+import type { Ambiguity, ExtractedConstraint, ExtractionResult, Goal, ProfileFact } from '../ai/types.ts';
+import { expandConstraints } from '../engine/constraints.ts';
 import { CONFIDENCE_THRESHOLD } from '../ai/types.ts';
 import { reconcile, type DiffableTask } from '../engine/dedup.ts';
 import { detectConflicts, type Conflict, type PlacedItem } from '../engine/conflicts.ts';
@@ -91,6 +92,8 @@ export interface Proposal {
   profileFacts?: ProfileFact[];
   /** Goals extracted from the same capture (planned later, NOT scheduled as tasks). */
   goals?: Goal[];
+  /** Scheduling boundaries extracted from the same capture (persisted on accept). */
+  constraints?: ExtractedConstraint[];
 }
 
 export interface BuildContext {
@@ -108,6 +111,8 @@ export interface BuildContext {
   traceId?: string;
   /** Protected intervals from the EXISTING schedule, so new items over them are flagged. */
   protectedBlocks?: Array<{ label: string; start: string; end: string }>;
+  /** Forbidden intervals from the user's EXISTING constraints (already expanded). */
+  constraintBlocks?: Array<{ label: string; start: string; end: string }>;
 }
 
 const DEFAULT_PRIORITY: CandidateTask['priority'] = 3;
@@ -216,7 +221,15 @@ export function buildProposal(extraction: ExtractionResult, ctx: BuildContext): 
     .filter((p) => protectedRefs.has(p.id))
     .map((p) => ({ id: p.id, label: p.title, start: p.start, end: p.end }));
   const existingProtected = (ctx.protectedBlocks ?? []).map((b, i) => ({ id: `ext${i}`, label: b.label, start: b.start, end: b.end }));
-  const conflicts = detectConflicts(placedItems, { protectedBlocks: [...protectedFromCandidates, ...existingProtected] });
+  // constraints: this capture's own + the user's existing, expanded to the conflict window
+  const windowTo = formatLocalDate(addDays(parseLocalDate(ctx.referenceDate), ctx.conflictWindowDays ?? 7));
+  const newConstraintBlocks = expandConstraints(extraction.constraints ?? [], ctx.referenceDate, windowTo, ctx.timezone)
+    .map((f) => ({ id: f.constraintId, label: f.label, start: f.start, end: f.end }));
+  const existingConstraintBlocks = (ctx.constraintBlocks ?? []).map((b, i) => ({ id: `con${i}`, label: b.label, start: b.start, end: b.end }));
+  const conflicts = detectConflicts(placedItems, {
+    protectedBlocks: [...protectedFromCandidates, ...existingProtected],
+    constraintBlocks: [...newConstraintBlocks, ...existingConstraintBlocks],
+  });
 
   return {
     id: ctx.idGen(),
@@ -230,6 +243,7 @@ export function buildProposal(extraction: ExtractionResult, ctx: BuildContext): 
     traceId: ctx.traceId,
     profileFacts: extraction.profile,
     goals: extraction.goals,
+    constraints: extraction.constraints,
   };
 }
 

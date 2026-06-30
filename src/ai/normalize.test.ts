@@ -11,6 +11,7 @@ function res(items: Partial<ExtractedItem>[], extra: Partial<ExtractionResult> =
   return {
     profile: extra.profile ?? [],
     goals: extra.goals ?? [],
+    constraints: extra.constraints ?? [],
     ambiguities: extra.ambiguities ?? [],
     warnings: extra.warnings ?? [],
     items: items.map((p, i) => ({ tempId: `t${i}`, title: p.title ?? '', type: p.type ?? 'flexible', category: p.category ?? 'other', confidence: p.confidence ?? 0.8, ...p })),

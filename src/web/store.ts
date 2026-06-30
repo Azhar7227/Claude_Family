@@ -7,7 +7,8 @@
  * Swapping in a production AIProvider later changes only `providerFor()`.
  */
 
-import type { CaptureSource, Occurrence, RecurrenceRule, Task, UUID } from '../domain/types.ts';
+import type { CaptureSource, Constraint, Occurrence, RecurrenceRule, Task, UUID } from '../domain/types.ts';
+import { expandConstraints } from '../engine/constraints.ts';
 import { normalize, type CaptureInput } from '../pipeline/capture.ts';
 import { extract } from '../ai/extraction.ts';
 import {
@@ -173,6 +174,9 @@ export class AppStore {
       const winTo = new Date(Date.parse(winFrom) + 9 * 86_400_000).toISOString();
       const existingProtected = protectedIntervals(this.repo.occurrences, this.repo.tasks, winFrom, winTo)
         .map((p) => ({ label: p.label, start: p.start, end: p.end }));
+      const winToDate = utcToLocalDate(winTo, tz);
+      const existingConstraints = expandConstraints(this.repo.listConstraints(), doc.referenceDate, winToDate, tz)
+        .map((f) => ({ label: f.label, start: f.start, end: f.end }));
       const proposal = await timed('Proposal', () =>
         buildProposal(extraction, {
           spaceId: 'me',
@@ -183,6 +187,7 @@ export class AppStore {
           now: () => this.nowIso(),
           traceId,
           protectedBlocks: existingProtected,
+          constraintBlocks: existingConstraints,
         }),
       );
       // attach the validation/eval summary for the console
@@ -200,8 +205,9 @@ export class AppStore {
   acceptPending(refs?: string[], edited = false): void {
     if (!this.pendingProposal) return;
     const accepted = acceptProposal(this.pendingProposal, refs);
-    // profile facts & goals are acknowledged context, never tasks — capture them on accept.
+    // profile facts, goals & constraints are acknowledged context, never tasks — capture on accept.
     this.mergeProfile(this.pendingProposal.profileFacts, this.pendingProposal.goals);
+    this.persistConstraints(this.pendingProposal.constraints);
     const source: CaptureSource = { method: methodOf(this.lastTrace), capturedAt: this.nowIso() };
     const result = commit(accepted, this.repo, { source, idGen: uuid, now: () => this.nowIso(), materializeDays: 35 });
     recordProposalOutcome(this.evalSink, accepted, { now: () => this.nowIso(), edited });
@@ -279,6 +285,8 @@ export class AppStore {
       status: e.status,
       protected: e.protected,
     }));
+    const constraintBlocks = expandConstraints(this.repo.listConstraints(), todayLocal, todayLocal, tz)
+      .map((f) => ({ label: f.label, start: f.start, end: f.end }));
     const proposal = buildMaintenanceProposal(items, [], trigger, {
       spaceId: 'me',
       now: this.nowIso(),
@@ -286,6 +294,7 @@ export class AppStore {
       dayEndLocal: this.settings.dayEndLocal,
       idGen: uuid,
       nowFn: () => this.nowIso(),
+      constraintBlocks,
     });
     return proposal.adjustments.length ? proposal : null;
   }
@@ -377,6 +386,22 @@ export class AppStore {
     return { lastSavedAt: this.durable.lastSavedAt(), snapshots: this.durable.snapshotInfo().length };
   }
 
+  // ---- Constraints ----
+  constraintList(): Constraint[] {
+    return this.repo.listConstraints();
+  }
+  deleteConstraint(id: UUID): void {
+    this.repo.removeConstraint(id);
+    this.emit();
+  }
+  private persistConstraints(constraints?: import('../ai/types.ts').ExtractedConstraint[]): void {
+    for (const c of constraints ?? []) {
+      const exists = this.repo.listConstraints().some((x) => x.label.toLowerCase() === c.label.toLowerCase() && x.kind === c.kind);
+      if (exists) continue;
+      this.repo.addConstraint({ id: uuid(), spaceId: 'me', source: 'chat', ...c });
+    }
+  }
+
   private mergeProfile(facts?: ProfileFact[], goals?: Goal[]): void {
     for (const f of facts ?? []) {
       const k = `${f.kind}|${f.value.toLowerCase()}`;
@@ -396,6 +421,7 @@ export class AppStore {
       recurrences: [...this.repo.recurrences.values()],
       occurrences: this.repo.occurrences,
       ledger: this.repo.ledger,
+      constraints: this.repo.listConstraints(),
       profileFacts: this.profileFacts,
       goals: this.goals,
     };
@@ -417,6 +443,7 @@ export class AppStore {
     for (const r of data.recurrences ?? []) repo.addRecurrence(r);
     repo.addOccurrences(data.occurrences ?? []);
     for (const l of data.ledger ?? []) repo.appendLedger(l);
+    for (const c of data.constraints ?? []) repo.addConstraint(c);
     this.repo = repo;
   }
 }
@@ -428,6 +455,7 @@ interface LifeflowData {
   recurrences: RecurrenceRule[];
   occurrences: Occurrence[];
   ledger: LedgerEntry[];
+  constraints?: Constraint[];
   profileFacts?: ProfileFact[];
   goals?: Goal[];
 }
