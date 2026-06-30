@@ -27,6 +27,8 @@ export interface ReplanItem {
   start: ISO;
   end: ISO;
   status: OccStatus;
+  /** Inviolable: frozen in place and never scheduled over. */
+  protected?: boolean;
 }
 
 export interface ProtectedInterval {
@@ -90,15 +92,17 @@ export function buildMaintenanceProposal(
   // (+ any newly-added calendar event), clipped to the [now, dayEnd] window.
   const window: Interval = { start: nowMs, end: dayEndMs };
   const blocks: LabeledBlock[] = [];
+  // A protected item (even a flexible one) AND any fixed event is a frozen block.
   for (const it of items) {
-    if (it.type !== 'fixed') continue;
     if (it.status === 'skipped') continue;
-    const b: LabeledBlock = { start: Date.parse(it.start), end: Date.parse(it.end), label: it.title, kind: 'fixed' };
+    if (!it.protected && it.type !== 'fixed') continue;
+    const b: LabeledBlock = { start: Date.parse(it.start), end: Date.parse(it.end), label: it.title, kind: it.protected ? 'protected' : 'fixed' };
     if (overlaps(b, window)) blocks.push(b);
   }
+  // External protected windows (e.g. standalone constraints) — dedupe against item-derived blocks.
   for (const p of protectedBlocks) {
     const b: LabeledBlock = { start: Date.parse(p.start), end: Date.parse(p.end), label: p.label, kind: 'protected' };
-    if (overlaps(b, window)) blocks.push(b);
+    if (overlaps(b, window) && !blocks.some((x) => x.start === b.start && x.end === b.end)) blocks.push(b);
   }
   if (trigger.kind === 'calendar_conflict') {
     const f = trigger.addedFixed;
@@ -106,8 +110,8 @@ export function buildMaintenanceProposal(
     if (overlaps(b, window)) blocks.push(b);
   }
 
-  // Flexible items still actionable today.
-  const pendingFlexible = items.filter((it) => it.type === 'flexible' && it.status === 'planned' && Date.parse(it.end) > nowMs);
+  // Flexible items still actionable today — protected items are frozen, never reflowed.
+  const pendingFlexible = items.filter((it) => it.type === 'flexible' && !it.protected && it.status === 'planned' && Date.parse(it.end) > nowMs);
 
   // Which flexible items must move: those overlapping a frozen block...
   const conflicting = pendingFlexible.filter((it) =>

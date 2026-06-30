@@ -106,6 +106,8 @@ export interface BuildContext {
   conflictWindowDays?: number;
   /** Observability correlation id; carried onto the Proposal, no logic impact. */
   traceId?: string;
+  /** Protected intervals from the EXISTING schedule, so new items over them are flagged. */
+  protectedBlocks?: Array<{ label: string; start: string; end: string }>;
 }
 
 const DEFAULT_PRIORITY: CandidateTask['priority'] = 3;
@@ -205,7 +207,16 @@ export function buildProposal(extraction: ExtractionResult, ctx: BuildContext): 
     }));
   }
 
-  const conflicts = detectConflicts(placeForConflicts(candidates, ctx));
+  // Conflict detection treats protected items (new or already scheduled) as
+  // inviolable blocks: a non-protected item overlapping protected time is flagged.
+  const placed = placeForConflicts(candidates, ctx);
+  const protectedRefs = new Set(candidates.filter((c) => c.candidate.protected).map((c) => c.tempId));
+  const placedItems = placed.filter((p) => !protectedRefs.has(p.id));
+  const protectedFromCandidates = placed
+    .filter((p) => protectedRefs.has(p.id))
+    .map((p) => ({ id: p.id, label: p.title, start: p.start, end: p.end }));
+  const existingProtected = (ctx.protectedBlocks ?? []).map((b, i) => ({ id: `ext${i}`, label: b.label, start: b.start, end: b.end }));
+  const conflicts = detectConflicts(placedItems, { protectedBlocks: [...protectedFromCandidates, ...existingProtected] });
 
   return {
     id: ctx.idGen(),

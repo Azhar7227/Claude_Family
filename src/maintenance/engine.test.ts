@@ -77,6 +77,26 @@ test('protected time is preserved (flexible never scheduled over it)', () => {
   assert.ok(adj.explanation!.constraintsPreserved.some((c) => c.includes('Family dinner') && c.includes('protected')));
 });
 
+test('a protected item is FROZEN (never reflowed) and never scheduled over', () => {
+  // Protected family dinner 19:00–20:00 (flexible type, to prove protection beats type),
+  // plus a flexible Study 18:00–19:00 that a new call will collide with.
+  const items: ReplanItem[] = [
+    item({ occurrenceId: 'dinner', title: 'Family dinner', type: 'flexible', protected: true, start: '2026-06-29T19:00:00Z', end: '2026-06-29T20:00:00Z' }),
+    item({ occurrenceId: 'study', title: 'Study', type: 'flexible', start: '2026-06-29T18:00:00Z', end: '2026-06-29T19:00:00Z' }),
+  ];
+  const proposal = buildMaintenanceProposal(items, [], {
+    kind: 'calendar_conflict', addedFixed: { title: 'Call', start: '2026-06-29T18:00:00Z', end: '2026-06-29T19:00:00Z' },
+  }, ctx());
+
+  // the protected dinner is never an adjustment target (frozen)
+  assert.ok(!proposal.adjustments.some((a) => a.targetRef === 'dinner'));
+  // study moved, and lands AFTER the protected dinner (>= 20:00), never on top of it
+  const studyAdj = proposal.adjustments.find((a) => a.targetRef === 'study')!;
+  assert.ok(studyAdj);
+  assert.ok(Date.parse(studyAdj.occurrenceChange!.afterStart) >= Date.parse('2026-06-29T20:00:00Z'));
+  assert.ok(studyAdj.explanation!.constraintsPreserved.some((c) => c.includes('Family dinner') && c.includes('protected')));
+});
+
 test('proposal-level explanation rolls up the changes', () => {
   const items = [
     item({ occurrenceId: 'a', title: 'A', type: 'flexible', start: '2026-06-29T18:00:00Z', end: '2026-06-29T19:00:00Z' }),

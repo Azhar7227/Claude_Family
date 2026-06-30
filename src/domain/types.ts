@@ -41,6 +41,8 @@ export interface Task {
   priority: 1 | 2 | 3 | 4 | 5; // 1 = highest
   estDurationMin?: number;
   notes?: string;
+  /** Inviolable: nothing may be scheduled over it and it is never auto-moved. */
+  protected?: boolean;
   source: CaptureSource;
 }
 

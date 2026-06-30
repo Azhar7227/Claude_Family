@@ -18,6 +18,39 @@ export interface TimelineEntry {
   start: string; // UTC ISO
   end: string; // UTC ISO
   status: OccStatus;
+  protected: boolean;
+}
+
+/** A frozen, inviolable interval derived from a protected task's occurrence. */
+export interface ProtectedInterval {
+  label: string;
+  start: string; // UTC ISO
+  end: string; // UTC ISO
+}
+
+/**
+ * Protected intervals from the live schedule within [fromIso, toIso] — occurrences
+ * whose task is protected (and still active). Feeds conflict detection + reflow so
+ * prayer/sleep/family-dinner are never scheduled over.
+ */
+export function protectedIntervals(
+  occurrences: Occurrence[],
+  tasks: Map<UUID, Task>,
+  fromIso: string,
+  toIso: string,
+): ProtectedInterval[] {
+  const from = Date.parse(fromIso);
+  const to = Date.parse(toIso);
+  const out: ProtectedInterval[] = [];
+  for (const o of occurrences) {
+    if (o.status === 'skipped') continue;
+    const task = tasks.get(o.taskId);
+    if (!task?.protected) continue;
+    const s = Date.parse(o.start);
+    if (s < from || s > to) continue;
+    out.push({ label: task.title, start: o.start, end: o.end });
+  }
+  return out;
 }
 
 export interface TodayView {
@@ -48,6 +81,7 @@ function join(occ: Occurrence, tasks: Map<UUID, Task>): TimelineEntry | undefine
     start: occ.start,
     end: occ.end,
     status: occ.status,
+    protected: Boolean(task.protected),
   };
 }
 

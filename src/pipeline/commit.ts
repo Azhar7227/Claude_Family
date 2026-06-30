@@ -134,6 +134,7 @@ export function commit(proposal: Proposal, repo: Repository, ctx: CommitContext)
         priority: candidate.priority,
         estDurationMin: candidate.estDurationMin,
         notes: candidate.notes,
+        protected: candidate.protected,
         source: ctx.source,
       };
       repo.addTask(task);
@@ -158,6 +159,7 @@ export function commit(proposal: Proposal, repo: Repository, ctx: CommitContext)
         type: after.type,
         category: after.category,
         priority: after.priority,
+        protected: after.protected,
       });
       repo.updateRecurrenceByTask(taskId, {
         rrule: after.rrule,

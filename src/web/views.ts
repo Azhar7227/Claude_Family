@@ -113,7 +113,7 @@ export function today(store: AppStore, dateLocal: string, setDate: (d: string) =
       h('span', { class: 'tl-main' },
         h('span', { class: 'cdot', style: `background:var(--cat-${e.category})` }),
         h('span', { class: 'tl-title' }, e.title),
-        e.type === 'fixed' ? h('span', { class: 'lock' }, icon('flag', 13)) : null,
+        e.protected ? h('span', { class: 'lock', title: 'Protected' }, icon('moon', 13)) : e.type === 'fixed' ? h('span', { class: 'lock' }, icon('flag', 13)) : null,
       ),
       e.status === 'planned' || e.status === 'done' ? tick : h('span', {}),
       actions,

@@ -24,7 +24,7 @@ import { IcsExtractionProvider } from '../ai/ics-provider.ts';
 import { InMemoryEvalSink, type ExtractionTrace } from '../eval/sink.ts';
 import type { AIProvider } from '../ai/provider.ts';
 import type { ExtractionResult } from '../ai/types.ts';
-import { buildTodayView, buildTimeline, type TodayView, type TimelineEntry } from '../read/today.ts';
+import { buildTodayView, buildTimeline, protectedIntervals, type TodayView, type TimelineEntry } from '../read/today.ts';
 import { computeReminderFires, type RemindableOccurrence } from '../engine/reminders.ts';
 import { planNotifications, type NotificationPlan } from '../engine/notifications.ts';
 import { buildMaintenanceProposal, type MaintenanceTrigger, type ReplanItem } from '../maintenance/engine.ts';
@@ -168,6 +168,11 @@ export class AppStore {
         const out = await extract(provider, { parts: doc.parts }, { sink: this.evalSink, traceId, inputMethod: doc.method, now: () => this.nowIso() });
         return out.result;
       });
+      // existing protected time in the conflict window, so new items over it are flagged
+      const winFrom = `${doc.referenceDate}T00:00:00.000Z`;
+      const winTo = new Date(Date.parse(winFrom) + 9 * 86_400_000).toISOString();
+      const existingProtected = protectedIntervals(this.repo.occurrences, this.repo.tasks, winFrom, winTo)
+        .map((p) => ({ label: p.label, start: p.start, end: p.end }));
       const proposal = await timed('Proposal', () =>
         buildProposal(extraction, {
           spaceId: 'me',
@@ -177,6 +182,7 @@ export class AppStore {
           idGen,
           now: () => this.nowIso(),
           traceId,
+          protectedBlocks: existingProtected,
         }),
       );
       // attach the validation/eval summary for the console
@@ -271,6 +277,7 @@ export class AppStore {
       start: e.start,
       end: e.end,
       status: e.status,
+      protected: e.protected,
     }));
     const proposal = buildMaintenanceProposal(items, [], trigger, {
       spaceId: 'me',
